@@ -2,22 +2,23 @@
 <html lang="es">
 <head>
     <meta charset="UTF-8">
-    <title>Caja Heladería - Verificación de Pagos</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Heladería - Verificación de Pagos</title>
     <style>
         body { font-family: Arial, sans-serif; background-color: #f4f6f9; text-align: center; padding: 20px; }
         .card { background: white; max-width: 450px; margin: 30px auto; padding: 25px; border-radius: 12px; box-shadow: 0 4px 10px rgba(0,0,0,0.1); }
         .status { padding: 20px; font-size: 22px; font-weight: bold; border-radius: 8px; margin-top: 20px; }
         .pagado { background-color: #d4edda; color: #155724; border: 2px solid #c3e6cb; }
         .esperando { background-color: #fff3cd; color: #856404; border: 2px solid #ffeeba; }
-        button { margin-top: 15px; padding: 10px 20px; font-size: 16px; border-radius: 6px; border: none; background: #6c757d; color: white; cursor: pointer; }
-        button:hover { background: #5a6268; }
+        button { margin-top: 20px; padding: 12px 24px; font-size: 16px; font-weight: bold; border-radius: 6px; border: none; background: #0d6efd; color: white; cursor: pointer; }
+        button:hover { background: #0b5ed7; }
     </style>
 </head>
 <body>
 
     <div class="card">
         <h2>🍦 Heladería - Panel de Caja</h2>
-        <p>Verificación automática de transferencias</p>
+        <p>Verificación automática de transferencias en tiempo real</p>
         
         <div id="estadoPago" class="status esperando">
             ⏳ Esperando transferencia...
@@ -37,13 +38,13 @@
 
                 if (datos.estado === 'pagado') {
                     caja.className = "status pagado";
-                    caja.innerHTML = `✅ ¡PAGO CONFIRMADO!<br>Monto: ${datos.monto}<br><small>Hora: ${datos.fecha}</small>`;
+                    caja.innerHTML = `✅ ¡PAGO CONFIRMADO!<br>Monto: ${datos.monto}<br><small style="font-size:14px; font-weight:normal;">Hora: ${datos.fecha}</small>`;
                 } else {
                     caja.className = "status esperando";
                     caja.innerHTML = "⏳ Esperando transferencia...";
                 }
             } catch (error) {
-                console.log("Error al consultar estado:", error);
+                console.log("Error al consultar el servidor:", error);
             }
         }
 
@@ -52,7 +53,7 @@
             consultarEstado();
         }
 
-        // Realiza una consulta automática al servidor cada 3 segundos
+        // Consultar el estado en el servidor cada 3 segundos
         setInterval(consultarEstado, 3000);
     </script>
 
