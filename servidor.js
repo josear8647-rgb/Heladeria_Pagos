@@ -1,104 +1,103 @@
 const express = require('express');
 const cors = require('cors');
-const imaps = require('imap-simple');
-const { simpleParser } = require('mailparser');
 const path = require('path');
 
 const app = express();
 app.use(cors());
 app.use(express.json());
 
-let ultimoPago = {
-    monto: 0,
-    estado: 'esperando',
-    fecha: null
-};
+const PORT = process.env.PORT || 3000;
 
-// Configuración de credenciales de Gmail
-const configGmail = {
-    imap: {
-        user: 'josear8647@gmail.com', // 👈 Pon tu correo
-        password: 'znipmuntqwnculhf', // 👈 Pon tu clave de aplicación de 16 letras
-        host: 'imap.gmail.com',
-        port: 993,
-        tls: true,
-        authTimeout: 10000,
-        tlsOptions: { rejectUnauthorized: false }
-    }
-};
+// Base de datos temporal en memoria
+let pagoActual = { confirmado: false, monto: 0, fecha: null, referencia: '' };
+let registroVentas = []; // Historial diario
 
-let revisando = false;
-
-async function revisarCorreos() {
-    if (revisando) return; // Evita acumular tareas si una revisión tarda
-    revisando = true;
-
-    let connection;
-    try {
-        connection = await imaps.connect(configGmail);
-        await connection.openBox('INBOX');
-
-        // Solo busca correos NO leídos
-        const searchCriteria = ['UNSEEN'];
-        const fetchOptions = { bodies: ['HEADER', 'TEXT'], markSeen: true };
-
-        const messages = await connection.search(searchCriteria, fetchOptions);
-
-        for (let item of messages) {
-            const textPart = item.parts.find(part => part.which === 'TEXT');
-            const headerPart = item.parts.find(part => part.which === 'HEADER');
-
-            const asunto = headerPart?.body?.subject?.[0] || '';
-            const texto = textPart?.body || '';
-
-            console.log('📬 Correo no leído detectado:', asunto);
-
-            const esBancolombiaONequi = 
-                asunto.toLowerCase().includes('transferencia') || 
-                asunto.toLowerCase().includes('recibiste') || 
-                texto.toLowerCase().includes('bancolombia') || 
-                texto.toLowerCase().includes('nequi');
-
-            if (esBancolombiaONequi) {
-                const coincidenciaMonto = texto.match(/\$\s?([0-9.,]+)/) || texto.match(/([0-9.,]+)\s?COP/);
-                let montoDetectado = coincidenciaMonto ? coincidenciaMonto[0] : 'Confirmado';
-
-                console.log(`✅ ¡Pago detectado!: ${montoDetectado}`);
-
-                ultimoPago = {
-                    monto: montoDetectado,
-                    estado: 'pagado',
-                    fecha: new Date().toLocaleTimeString('es-CO', { timeZone: 'America/Bogota' })
-                };
-            }
-        }
-    } catch (error) {
-        console.error('Error al revisar correo:', error.message);
-    } finally {
-        if (connection) {
-            try { connection.end(); } catch(e) {}
-        }
-        revisando = false;
-    }
+function getFechaHoy() {
+    const hoy = new Date();
+    return hoy.toISOString().split('T')[0];
 }
 
-// Revisa cada 20 segundos para ahorrar memoria RAM en Render
-setInterval(revisarCorreos, 5000);
-
+// Servir la pantalla de la heladería
 app.get('/', (req, res) => {
     res.sendFile(path.join(__dirname, 'index.html'));
 });
 
+// 1. RUTA INSTANTÁNEA (Make / Webhook / Nequi / Bancolombia)
+app.post('/alerta-bancolombia', (req, res) => {
+    const { monto, referencia } = req.body;
+    const montoNum = parseFloat(monto) || 0;
+    const horaActual = new Date().toLocaleTimeString('es-CO', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+
+    if (montoNum > 0) {
+        pagoActual = {
+            confirmado: true,
+            monto: montoNum,
+            fecha: horaActual,
+            referencia: referencia || 'N/A'
+        };
+
+        registroVentas.push({
+            id: Date.now(),
+            monto: montoNum,
+            hora: horaActual,
+            tipo: 'Transferencia (Auto)',
+            referencia: referencia || 'N/A',
+            fechaCompleta: getFechaHoy()
+        });
+
+        console.log(`⚡ Pago automático registrado: $${montoNum} - Ref: ${referencia}`);
+    }
+
+    res.status(200).send('OK');
+});
+
+// 2. Consulta estado de pago en pantalla
 app.get('/estado-pago', (req, res) => {
-    res.json(ultimoPago);
+    res.json(pagoActual);
 });
 
-app.post('/reiniciar', (req, res) => {
-    ultimoPago = { monto: 0, estado: 'esperando', fecha: null };
-    res.json({ mensaje: 'Caja reiniciada' });
+// 3. Confirmar y limpiar pantalla para la siguiente venta
+app.post('/limpiar-pago', (req, res) => {
+    pagoActual = { confirmado: false, monto: 0, fecha: null, referencia: '' };
+    res.json({ status: 'ok' });
 });
 
-const PORT = process.env.PORT || 10000;
+// 4. Obtener contabilidad y resumen del día
+app.get('/ventas-dia', (req, res) => {
+    const fechaHoy = getFechaHoy();
+    const ventasHoy = registroVentas.filter(v => v.fechaCompleta === fechaHoy);
+    const totalAcumulado = ventasHoy.reduce((acc, curr) => acc + curr.monto, 0);
+
+    res.json({
+        total: totalAcumulado,
+        cantidad: ventasHoy.length,
+        ventas: ventasHoy
+    });
+});
+
+// 5. Agregar registro manual (Efectivo / Transferencia manual)
+app.post('/agregar-manual', (req, res) => {
+    const { monto, descripcion } = req.body;
+    const montoNum = parseFloat(monto);
+
+    if (!montoNum || montoNum <= 0) {
+        return res.status(400).json({ error: 'Monto no válido' });
+    }
+
+    const horaActual = new Date().toLocaleTimeString('es-CO', { hour: '2-digit', minute: '2-digit' });
+    const nuevaVenta = {
+        id: Date.now(),
+        monto: montoNum,
+        hora: horaActual,
+        tipo: descripcion || 'Efectivo / Manual',
+        referencia: 'Manual',
+        fechaCompleta: getFechaHoy()
+    };
+
+    registroVentas.push(nuevaVenta);
+    res.json({ status: 'ok', venta: nuevaVenta });
+});
+
 app.listen(PORT, () => {
-    console.log(`🚀 Servidor listo en puerto ${PORT}`);
+    console.log(`🚀 Servidor ejecutándose en el puerto ${PORT}`);
 });
