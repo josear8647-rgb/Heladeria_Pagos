@@ -1,69 +1,96 @@
 const express = require('express');
-const path = require('path');
+const cors = require('cors');
+const imaps = require('imap-simple');
+const { simpleParser } = require('mailparser');
+
 const app = express();
-const PORT = process.env.PORT || 3000;
-
-// Configurar servidor para recibir datos JSON y servir archivos estáticos
+app.use(cors());
 app.use(express.json());
-app.use(express.static(path.join(__dirname, '/')));
 
-// Variable en memoria para guardar el último pago
-let ultimoPagoRegistrado = null;
+// Sirve los archivos estáticos (tu página web)
+app.use(express.static('public'));
 
-// RUTA PRINCIPAL: Muestra la pantalla de la heladería
-app.get('/', (req, res) => {
-    res.sendFile(path.join(__dirname, 'index.html'));
-});
+let ultimoPago = {
+    monto: 0,
+    estado: 'esperando',
+    fecha: null
+};
 
-// RUTA CONSULTA: La pantalla pregunta cada segundo si hay un nuevo pago
-app.get('/api/ultimo-pago', (req, res) => {
-    res.json(ultimoPagoRegistrado || { mensaje: 'Sin pagos nuevos' });
-});
+// Configuración para conectarse a tu Gmail
+const configGmail = {
+    imap: {
+        user: 'TU_CORREO_AQUI@gmail.com', // 👈 Escribe aquí tu correo de Gmail
+        password: 'xxxx xxxx xxxx xxxx', // 👈 Pega aquí la clave de 16 letras
+        host: 'imap.gmail.com',
+        port: 993,
+        tls: true,
+        authTimeout: 30000,
+        tlsOptions: { rejectUnauthorized: false }
+    }
+};
 
-// RUTA WEBHOOK: Recibe los pagos de Wompi / Bancolombia o de Thunder Client
-app.post('/webhook', (req, res) => {
-    console.log("🔔 ¡NOTIFICACIÓN DE PAGO RECIBIDA EN /webhook!");
-    console.log(JSON.stringify(req.body, null, 2));
+// Función para revisar los correos de Bancolombia / Nequi
+async function revisarCorreos() {
+    try {
+        const connection = await imaps.connect(configGmail);
+        await connection.openBox('INBOX');
 
-    let montoRecibido = 0;
-    let bancoRecibido = 'Bancolombia / Nequi';
-    let detalleRecibido = 'Transferencia confirmada';
+        // Busca correos no leídos que contengan palabras de transferencia
+        const searchCriteria = ['UNSEEN'];
+        const fetchOptions = { bodies: ['HEADER', 'TEXT', ''], markSeen: true };
 
-    // 1. Si la notificación viene de Wompi (Pago Real por QR)
-    if (req.body && req.body.event === 'transaction.updated') {
-        const transaccion = req.body.data.transaction;
-        if (transaccion.status === 'APPROVED') {
-            montoRecibido = transaccion.amount_in_cents / 100; // Wompi envía en centavos
-            bancoRecibido = transaccion.payment_method_type || 'Bancolombia QR';
-            detalleRecibido = `Ref Wompi: ${transaccion.id}`;
-        } else {
-            return res.status(200).send('Transacción no aprobada ignorada');
+        const messages = await connection.search(searchCriteria, fetchOptions);
+
+        for (let item of messages) {
+            const all = item.parts.find(part => part.which === '');
+            const parsed = await simpleParser(all.body);
+
+            const asunto = parsed.subject || '';
+            const texto = parsed.text || '';
+
+            console.log('📬 Nuevo correo recibido:', asunto);
+
+            // Filtramos si el correo viene de Bancolombia o Nequi
+            if (asunto.includes('Transferencia') || asunto.includes('Recibiste') || texto.includes('Bancolombia') || texto.includes('Nequi')) {
+                // Buscamos un monto de dinero dentro del texto (ej: $12.000 o 12000)
+                const coincidenciaMonto = texto.match(/\$\s?([0-9.,]+)/) || texto.match(/([0-9.,]+)\s?COP/);
+
+                let montoDetectado = 'Confirmado';
+                if (coincidenciaMonto) {
+                    montoDetectado = coincidenciaMonto[0];
+                }
+
+                console.log(`✅ ¡Pago detectado! Monto: ${montoDetectado}`);
+
+                ultimoPago = {
+                    monto: montoDetectado,
+                    estado: 'pagado',
+                    fecha: new Date().toLocaleTimeString()
+                };
+            }
         }
-    } 
-    // 2. Si es una prueba manual desde Thunder Client / Postman
-    else if (req.body && req.body.monto) {
-        montoRecibido = req.body.monto;
-        bancoRecibido = req.body.banco || 'Bancolombia (Prueba)';
-        detalleRecibido = req.body.concepto || 'Prueba de transferencia';
-    }
 
-    // Si el pago es válido, guardamos los datos para enviarlos a la pantalla
-    if (montoRecibido > 0) {
-        ultimoPagoRegistrado = {
-            id: Date.now(),
-            monto: montoRecibido,
-            banco: bancoRecibido,
-            concepto: detalleRecibido,
-            fecha: new Date().toLocaleTimeString('es-CO')
-        };
-        console.log(`✅ Pago guardado con éxito: $${montoRecibido} COP`);
+        connection.end();
+    } catch (error) {
+        console.error('Error al revisar el correo:', error.message);
     }
+}
 
-    // Responder siempre con 200 OK
-    res.status(200).json({ status: 'OK', mensaje: 'Notificación procesada' });
+// Revisa el correo automáticamente cada 10 segundos
+setInterval(revisarCorreos, 10000);
+
+// Ruta para que la página de la caja consulte el estado del pago
+app.get('/estado-pago', (req, res) => {
+    res.json(ultimoPago);
 });
 
-// Iniciar el servidor
+// Ruta para reiniciar el estado de la caja a "Esperando"
+app.post('/reiniciar', (req, res) => {
+    ultimoPago = { monto: 0, estado: 'esperando', fecha: null };
+    res.json({ mensaje: 'Caja reiniciada' });
+});
+
+const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
     console.log(`🚀 Servidor ejecutándose en el puerto ${PORT}`);
 });

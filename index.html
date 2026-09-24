@@ -2,145 +2,58 @@
 <html lang="es">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Caja Heladería - Control de Pagos</title>
+    <title>Caja Heladería - Verificación de Pagos</title>
     <style>
-        * { box-sizing: border-box; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
-        body { background-color: #f0f2f5; margin: 0; padding: 20px; display: flex; justify-content: center; }
-        .container { max-width: 650px; width: 100%; }
-        .card { background: white; border-radius: 12px; padding: 25px; box-shadow: 0 4px 15px rgba(0,0,0,0.08); margin-bottom: 20px; text-align: center; }
-        h1 { margin-top: 0; color: #1a252c; font-size: 24px; }
-        .subtitle { color: #65676b; font-size: 14px; margin-bottom: 20px; }
-        
-        .status-box { padding: 20px; border-radius: 10px; font-size: 18px; font-weight: bold; margin-bottom: 20px; transition: all 0.3s ease; }
-        .esperando { background-color: #fff8e1; color: #b78103; border: 2px dashed #ffe082; }
-        .exitoso { background-color: #e8f5e9; color: #2e7d32; border: 2px solid #a5d6a7; transform: scale(1.02); }
-
-        .form-group { text-align: left; margin-bottom: 15px; }
-        label { display: block; font-weight: 600; margin-bottom: 5px; color: #333; }
-        input { width: 100%; padding: 10px; border: 1px solid #ccc; border-radius: 6px; font-size: 16px; }
-        
-        button { width: 100%; padding: 12px; background-color: #007bff; color: white; border: none; border-radius: 6px; font-size: 16px; font-weight: bold; cursor: pointer; }
-        button:hover { background-color: #0056b3; }
-
-        table { width: 100%; border-collapse: collapse; margin-top: 15px; text-align: left; }
-        th, td { padding: 10px; border-bottom: 1px solid #ddd; font-size: 14px; }
-        th { background-color: #f8f9fa; color: #495057; }
-        .badge { padding: 4px 8px; border-radius: 4px; font-size: 12px; font-weight: bold; }
-        .badge-auto { background-color: #e3f2fd; color: #0d47a1; }
-        .badge-manual { background-color: #f3e5f5; color: #4a148c; }
+        body { font-family: Arial, sans-serif; background-color: #f4f6f9; text-align: center; padding: 20px; }
+        .card { background: white; max-width: 450px; margin: 30px auto; padding: 25px; border-radius: 12px; box-shadow: 0 4px 10px rgba(0,0,0,0.1); }
+        .status { padding: 20px; font-size: 22px; font-weight: bold; border-radius: 8px; margin-top: 20px; }
+        .pagado { background-color: #d4edda; color: #155724; border: 2px solid #c3e6cb; }
+        .esperando { background-color: #fff3cd; color: #856404; border: 2px solid #ffeeba; }
+        button { margin-top: 15px; padding: 10px 20px; font-size: 16px; border-radius: 6px; border: none; background: #6c757d; color: white; cursor: pointer; }
+        button:hover { background: #5a6268; }
     </style>
 </head>
 <body>
 
-    <div class="container">
-        <!-- Panel Principal de Transferencias -->
-        <div class="card">
-            <h1>🍦 Heladería - Control de Caja</h1>
-            <p class="subtitle">Verificación automática de transferencias (Bancolombia / Nequi / Wompi)</p>
-
-            <div id="estadoPago" class="status-box esperando">
-                ⏳ Esperando transferencia...
-            </div>
+    <div class="card">
+        <h2>🍦 Heladería - Panel de Caja</h2>
+        <p>Verificación automática de transferencias</p>
+        
+        <div id="estadoPago" class="status esperando">
+            ⏳ Esperando transferencia...
         </div>
 
-        <!-- Cobro / Registro Manual -->
-        <div class="card">
-            <h2 style="font-size: 18px; text-align: left; margin-top: 0;">Registrar Cobro Manual (Efectivo / Otro)</h2>
-            <div class="form-group">
-                <label for="monto">Monto ($ COP):</label>
-                <input type="number" id="monto" placeholder="Ej: 12000">
-            </div>
-            <div class="form-group">
-                <label for="concepto">Detalle / Helado:</label>
-                <input type="text" id="concepto" placeholder="Ej: Cono 2 bolas + Malteada">
-            </div>
-            <button onclick="registrarVentaManual()">Registrar Pago Manual</button>
-        </div>
-
-        <!-- Tabla de Contabilidad del Día -->
-        <div class="card">
-            <h2 style="font-size: 18px; text-align: left; margin-top: 0;">Resumen de Ventas del Día</h2>
-            <table>
-                <thead>
-                    <tr>
-                        <th>Hora</th>
-                        <th>Detalle</th>
-                        <th>Tipo</th>
-                        <th>Monto</th>
-                    </tr>
-                </thead>
-                <tbody id="tablaVentas">
-                    <!-- Aquí se irán acumulando los pagos -->
-                </tbody>
-            </table>
-        </div>
+        <br>
+        <button onclick="reiniciarCaja()">🔄 Reiniciar para Nuevo Cliente</button>
     </div>
 
     <script>
-        let ultimoIdProcesado = null;
-
-        // Función para mostrar el pago en pantalla y agregarlo a la tabla
-        function mostrarPago(monto, detalle, tipo, hora) {
-            let caja = document.getElementById("estadoPago");
-            let horaActual = hora || new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
-
-            // Poner pantalla en verde
-            caja.className = "status-box exitoso";
-            caja.innerHTML = `✅ ¡PAGO CONFIRMADO!<br>$${monto.toLocaleString()} COP<br><small style="font-weight:normal; font-size:14px;">${detalle}</small>`;
-
-            // Agregar a la tabla de contabilidad
-            let tabla = document.getElementById("tablaVentas");
-            let nuevaFila = `
-                <tr>
-                    <td>${horaActual}</td>
-                    <td>${detalle}</td>
-                    <td><span class="badge ${tipo === 'Automático' ? 'badge-auto' : 'badge-manual'}">${tipo}</span></td>
-                    <td><strong>$${monto.toLocaleString()}</strong></td>
-                </tr>
-            `;
-            tabla.innerHTML = nuevaFila + tabla.innerHTML;
-
-            // Volver al estado normal de espera después de 10 segundos
-            setTimeout(() => {
-                caja.className = "status-box esperando";
-                caja.innerHTML = "⏳ Esperando transferencia...";
-            }, 10000);
-        }
-
-        // Consultar continuamente al servidor si llegó un pago automático
-        async function consultarPagosAutomaticos() {
+        async function consultarEstado() {
             try {
-                let respuesta = await fetch('/api/ultimo-pago');
-                let datos = await respuesta.json();
+                const respuesta = await fetch('/estado-pago');
+                const datos = await respuesta.json();
 
-                if (datos && datos.id && datos.id !== ultimoIdProcesado) {
-                    ultimoIdProcesado = datos.id;
-                    mostrarPago(datos.monto, `${datos.banco} - ${datos.concepto}`, 'Automático', datos.fecha);
+                const caja = document.getElementById("estadoPago");
+
+                if (datos.estado === 'pagado') {
+                    caja.className = "status pagado";
+                    caja.innerHTML = `✅ ¡PAGO CONFIRMADO!<br>Monto: ${datos.monto}<br><small>Hora: ${datos.fecha}</small>`;
+                } else {
+                    caja.className = "status esperando";
+                    caja.innerHTML = "⏳ Esperando transferencia...";
                 }
             } catch (error) {
-                console.log("Esperando servidor...");
+                console.log("Error al consultar estado:", error);
             }
         }
 
-        // Preguntar al servidor cada 2 segundos
-        setInterval(consultarPagosAutomaticos, 2000);
-
-        // Registro de ventas manuales
-        function registrarVentaManual() {
-            let montoInput = document.getElementById("monto").value;
-            let conceptoInput = document.getElementById("concepto").value || "Venta en efectivo / manual";
-
-            if (!montoInput || montoInput <= 0) {
-                alert("Por favor ingresa un monto válido");
-                return;
-            }
-
-            mostrarPago(parseInt(montoInput), conceptoInput, "Manual");
-
-            document.getElementById("monto").value = "";
-            document.getElementById("concepto").value = "";
+        async function reiniciarCaja() {
+            await fetch('/reiniciar', { method: 'POST' });
+            consultarEstado();
         }
+
+        // Consulta el servidor cada 3 segundos
+        setInterval(consultarEstado, 3000);
     </script>
 
 </body>
