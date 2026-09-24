@@ -12,7 +12,7 @@ const PORT = process.env.PORT || 3000;
 // Configuración IMAP para Gmail
 const configImap = {
     user: 'josear8647@gmail.com', // <--- Reemplaza con tu correo
-    password: 'eboosegtciponszm', // <--- Reemplaza con tu contraseña de aplicación de 16 letras
+    password: 'eboosegtciponszm', // <--- Reemplaza con tu contraseña de 16 letras
     host: 'imap.gmail.com',
     port: 993,
     tls: true,
@@ -27,14 +27,14 @@ function getFechaHoy() {
     return new Date().toISOString().split('T')[0];
 }
 
-// Lógica de lectura automática de correos
+// Lógica de lectura automática de correos Bancolombia
 function iniciarEscuchaEmail() {
     const imap = new Imap(configImap);
 
     imap.once('ready', () => {
         imap.openBox('INBOX', false, (err, box) => {
             if (err) return console.error('Error al abrir buzón:', err);
-            console.log('📬 Servidor escuchando transferencias...');
+            console.log('📬 Servidor escuchando transferencias de Bancolombia...');
 
             imap.on('mail', () => {
                 const fetch = imap.seq.fetch(box.messages.total + ':*', { bodies: '' });
@@ -43,31 +43,45 @@ function iniciarEscuchaEmail() {
                         simpleParser(stream, async (err, parsed) => {
                             if (err) return;
 
-                            const texto = parsed.text || '';
-                            const asunto = parsed.subject || '';
+                            const texto = (parsed.text || '').toLowerCase();
+                            const asunto = (parsed.subject || '').toLowerCase();
+                            const contenidoCompleto = asunto + " " + texto;
 
-                            if (asunto.includes('transferencia') || texto.includes('recibió') || texto.includes('abono')) {
-                                const coincidenciaMonto = texto.match(/\$\s?([\d.,]+)/);
+                            // Verifica si es un correo de entrada de dinero de Bancolombia
+                            if (contenidoCompleto.includes('recibiste') || contenidoCompleto.includes('transferencia') || contenidoCompleto.includes('consignacion')) {
+                                
+                                // Expresión regular ajustada para capturar montos como $3,000.00 o $200,000.00
+                                const coincidenciaMonto = parsed.text.match(/\$\s?([\d.,]+)/);
                                 if (coincidenciaMonto) {
-                                    const montoStr = coincidenciaMonto[1].replace(/\./g, '').replace(',', '.');
-                                    const montoNum = parseFloat(montoStr);
+                                    let montoLimpio = coincidenciaMonto[1];
+                                    
+                                    // Manejo de formato numérico colombiano (100,000.00 o 100.000,00)
+                                    if (montoLimpio.includes('.') && montoLimpio.includes(',')) {
+                                        montoLimpio = montoLimpio.replace(/,/g, '');
+                                    } else if (montoLimpio.includes(',')) {
+                                        montoLimpio = montoLimpio.replace(/,/g, '');
+                                    }
+
+                                    const montoNum = parseFloat(montoLimpio);
                                     const horaActual = new Date().toLocaleTimeString('es-CO', { hour: '2-digit', minute: '2-digit' });
 
-                                    pagoActual = {
-                                        confirmado: true,
-                                        monto: montoNum,
-                                        fecha: horaActual
-                                    };
+                                    if (!isNaN(montoNum) && montoNum > 0) {
+                                        pagoActual = {
+                                            confirmado: true,
+                                            monto: montoNum,
+                                            fecha: horaActual
+                                        };
 
-                                    registroVentas.push({
-                                        id: Date.now(),
-                                        monto: montoNum,
-                                        hora: horaActual,
-                                        tipo: 'Automática (Bancolombia)',
-                                        fechaCompleta: getFechaHoy()
-                                    });
+                                        registroVentas.push({
+                                            id: Date.now(),
+                                            monto: montoNum,
+                                            hora: horaActual,
+                                            tipo: 'Automática (Bancolombia)',
+                                            fechaCompleta: getFechaHoy()
+                                        });
 
-                                    console.log(`✅ Transferencia detectada: $${montoNum}`);
+                                        console.log(`✅ Transferencia detectada de Bancolombia: $${montoNum}`);
+                                    }
                                 }
                             }
                         });
