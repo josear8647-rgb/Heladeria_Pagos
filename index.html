@@ -3,78 +3,80 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Caja Heladería - Verificación en Tiempo Real</title>
+    <title>Caja Heladería - Verificación de Pagos</title>
     <style>
         * { box-sizing: border-box; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
-        body { background-color: #eef2f5; margin: 0; padding: 20px; display: flex; justify-content: center; }
-        .container { max-width: 500px; width: 100%; background: white; padding: 25px; border-radius: 16px; box-shadow: 0 8px 20px rgba(0,0,0,0.08); }
-        h1 { margin-top: 0; color: #333; text-align: center; font-size: 24px; }
-        .sub { text-align: center; color: #666; margin-bottom: 20px; font-size: 14px; }
-        
-        .status-box { padding: 25px; border-radius: 12px; text-align: center; font-size: 22px; font-weight: bold; margin: 20px 0; transition: all 0.3s ease; }
-        .esperando { background-color: #fef3c7; color: #92400e; border: 2px dashed #f59e0b; }
-        .confirmado { background-color: #d1fae5; color: #065f46; border: 2px solid #10b981; }
-        
-        .historial { margin-top: 25px; border-top: 1px solid #eee; padding-top: 15px; }
-        .historial h3 { font-size: 16px; color: #444; margin-bottom: 10px; }
-        .item-pago { display: flex; justify-content: space-between; background: #f8fafc; padding: 10px 12px; border-radius: 6px; margin-bottom: 8px; font-size: 14px; border-left: 4px solid #10b981; }
+        body { background-color: #eef2f5; margin: 0; padding: 20px; display: flex; justify-content: center; align-items: center; min-height: 100vh; }
+        .container { max-width: 480px; width: 100%; background: white; padding: 30px; border-radius: 16px; box-shadow: 0 8px 20px rgba(0,0,0,0.08); text-align: center; }
+        h1 { margin-top: 0; color: #1e293b; font-size: 22px; }
+        p.sub { color: #64748b; font-size: 14px; margin-bottom: 25px; }
+
+        /* Estado del Pago */
+        .status-box { padding: 30px 20px; border-radius: 14px; font-size: 20px; font-weight: bold; margin: 20px 0; transition: all 0.4s ease; }
+        .esperando { background-color: #fef3c7; color: #b45309; border: 2px dashed #f59e0b; }
+        .confirmado { background-color: #d1fae5; color: #047857; border: 2px solid #10b981; transform: scale(1.02); }
+
+        /* Historial */
+        .historial { margin-top: 25px; border-top: 1px solid #e2e8f0; padding-top: 15px; text-align: left; }
+        .historial h3 { font-size: 15px; color: #334155; margin-bottom: 12px; }
+        .item-pago { display: flex; justify-content: space-between; background: #f8fafc; padding: 10px 14px; border-radius: 8px; margin-bottom: 8px; font-size: 14px; border-left: 4px solid #10b981; }
     </style>
 </head>
 <body>
 
     <div class="container">
         <h1>🍦 Heladería - Panel de Caja</h1>
-        <p class="sub">Sistema conectado al servidor de pagos</p>
+        <p class="sub">Verificación automática de transferencias</p>
 
-        <!-- Indicador de Estado -->
+        <!-- Caja de Estado que cambia a Verde -->
         <div id="pantallaEstado" class="status-box esperando">
             ⏳ Esperando transferencia de Bancolombia...
         </div>
 
-        <!-- Historial Reciente -->
+        <!-- Historial de las transferencias recibidas -->
         <div class="historial">
             <h3>Últimas transferencias confirmadas:</h3>
             <div id="listaHistorial">
-                <!-- Se llenará automáticamente -->
+                <!-- Se agregan dinámicamente -->
             </div>
         </div>
     </div>
 
     <script>
-        // Consultar al servidor cada 2 segundos si llegó una transferencia nueva
+        // Función para consultar al servidor en Render cada 2 segundos
         setInterval(async () => {
             try {
-                let respuesta = await fetch('/ultimo-pago');
+                let respuesta = await fetch('/consultar-pago');
                 let datos = await respuesta.json();
 
                 if (datos.nuevoPago) {
-                    mostrarPagoExitoso(datos.monto, datos.banco);
+                    mostrarPagoExitoso(datos.pago.monto, datos.pago.banco, datos.pago.fecha);
                 }
             } catch (error) {
-                console.log("Esperando respuesta del servidor...");
+                console.log("Conectando con el servidor...");
             }
         }, 2000);
 
-        function mostrarPagoExitoso(monto, banco) {
+        function mostrarPagoExitoso(monto, banco, hora) {
             let pantalla = document.getElementById("pantallaEstado");
             
+            // Cambiar pantalla a VERDE
             pantalla.className = "status-box confirmado";
             pantalla.innerHTML = `✅ ¡PAGO CONFIRMADO!<br>$${Number(monto).toLocaleString('es-CO')} COP<br><small style="font-size:14px; font-weight:normal;">Recibido desde ${banco}</small>`;
 
+            // Agregar registro al historial de la pantalla
             let lista = document.getElementById("listaHistorial");
-            let hora = new Date().toLocaleTimeString('es-CO', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
-            
             let nuevoItem = document.createElement("div");
             nuevoItem.className = "item-pago";
             nuevoItem.innerHTML = `<span><strong>Hora:</strong> ${hora}</span> <span><strong>$${Number(monto).toLocaleString('es-CO')}</strong> (${banco})</span>`;
             
             lista.prepend(nuevoItem);
 
-            // Volver a estado de espera a los 6 segundos
+            // Volver a estado de espera automáticamente después de 7 segundos
             setTimeout(() => {
                 pantalla.className = "status-box esperando";
                 pantalla.innerHTML = "⏳ Esperando transferencia de Bancolombia...";
-            }, 6000);
+            }, 7000);
         }
     </script>
 
