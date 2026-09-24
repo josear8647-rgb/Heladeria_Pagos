@@ -43,7 +43,9 @@
     </div>
 
     <script>
-        // Consulta el estado del servidor cada 2 segundos
+        let temporizadorLimpieza = null;
+
+        // Consultar constantemente al servidor cada 2 segundos
         setInterval(async () => {
             try {
                 let respuesta = await fetch('/consultar-pago');
@@ -53,21 +55,21 @@
                     mostrarPagoExitoso(datos.pago.monto, datos.pago.banco, datos.pago.fecha);
                 }
             } catch (error) {
-                console.log("Conectando con el servidor...");
+                console.log("Reconectando con el servidor...");
             }
         }, 2000);
 
         function mostrarPagoExitoso(monto, banco, hora) {
             let pantalla = document.getElementById("pantallaEstado");
             
-            // Formatear el monto a pesos colombianos
+            // Formato monetario en pesos colombianos
             let montoFormateado = isNaN(monto) ? monto : `$${Number(monto).toLocaleString('es-CO')} COP`;
 
             // Cambiar pantalla a VERDE
             pantalla.className = "status-box confirmado";
             pantalla.innerHTML = `✅ ¡PAGO CONFIRMADO!<br>${montoFormateado}<br><small style="font-size:14px; font-weight:normal;">Recibido desde ${banco}</small>`;
 
-            // Agregar registro al historial de la caja
+            // Agregar el registro al historial visual
             let lista = document.getElementById("listaHistorial");
             let nuevoItem = document.createElement("div");
             nuevoItem.className = "item-pago";
@@ -75,8 +77,11 @@
             
             lista.prepend(nuevoItem);
 
+            // Reiniciar temporizador si entra otro pago seguido
+            if (temporizadorLimpieza) clearTimeout(temporizadorLimpieza);
+
             // Volver automáticamente al estado de espera tras 8 segundos
-            setTimeout(() => {
+            temporizadorLimpieza = setTimeout(() => {
                 pantalla.className = "status-box esperando";
                 pantalla.innerHTML = "⏳ Esperando transferencia de Bancolombia...";
             }, 8000);
