@@ -3,80 +3,123 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Caja Heladería - Verificación de Pagos</title>
+    <title>Caja Heladería - Control de Pagos</title>
     <style>
         * { box-sizing: border-box; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
-        body { background-color: #eef2f5; margin: 0; padding: 20px; display: flex; justify-content: center; align-items: center; min-height: 100vh; }
-        .container { max-width: 480px; width: 100%; background: white; padding: 30px; border-radius: 16px; box-shadow: 0 8px 20px rgba(0,0,0,0.08); text-align: center; }
-        h1 { margin-top: 0; color: #1e293b; font-size: 22px; }
-        p.sub { color: #64748b; font-size: 14px; margin-bottom: 25px; }
+        body { background-color: #f0f2f5; margin: 0; padding: 20px; display: flex; justify-content: center; }
+        .container { max-width: 600px; width: 100%; }
+        .card { background: white; border-radius: 12px; padding: 25px; box-shadow: 0 4px 15px rgba(0,0,0,0.08); margin-bottom: 20px; text-align: center; }
+        h1 { margin-top: 0; color: #1a252c; font-size: 24px; }
+        .subtitle { color: #65676b; font-size: 14px; margin-bottom: 20px; }
+        
+        .status-box { padding: 20px; border-radius: 10px; font-size: 18px; font-weight: bold; margin-bottom: 20px; }
+        .esperando { background-color: #fff8e1; color: #b78103; border: 2px dashed #ffe082; }
+        .exitoso { background-color: #e8f5e9; color: #2e7d32; border: 2px solid #a5d6a7; }
 
-        /* Estado del Pago */
-        .status-box { padding: 30px 20px; border-radius: 14px; font-size: 20px; font-weight: bold; margin: 20px 0; transition: all 0.4s ease; }
-        .esperando { background-color: #fef3c7; color: #b45309; border: 2px dashed #f59e0b; }
-        .confirmado { background-color: #d1fae5; color: #047857; border: 2px solid #10b981; transform: scale(1.02); }
+        .form-group { text-align: left; margin-bottom: 15px; }
+        label { display: block; font-weight: 600; margin-bottom: 5px; color: #333; }
+        input { width: 100%; padding: 10px; border: 1px solid #ccc; border-radius: 6px; font-size: 16px; }
+        
+        button { width: 100%; padding: 12px; background-color: #007bff; color: white; border: none; border-radius: 6px; font-size: 16px; font-weight: bold; cursor: pointer; transition: 0.2s; }
+        button:hover { background-color: #0056b3; }
 
-        /* Historial */
-        .historial { margin-top: 25px; border-top: 1px solid #e2e8f0; padding-top: 15px; text-align: left; }
-        .historial h3 { font-size: 15px; color: #334155; margin-bottom: 12px; }
-        .item-pago { display: flex; justify-content: space-between; background: #f8fafc; padding: 10px 14px; border-radius: 8px; margin-bottom: 8px; font-size: 14px; border-left: 4px solid #10b981; }
+        table { width: 100%; border-collapse: collapse; margin-top: 15px; text-align: left; }
+        th, td { padding: 10px; border-bottom: 1px solid #ddd; font-size: 14px; }
+        th { background-color: #f8f9fa; color: #495057; }
+        .badge { padding: 4px 8px; border-radius: 4px; font-size: 12px; font-weight: bold; }
+        .badge-auto { background-color: #e3f2fd; color: #0d47a1; }
+        .badge-manual { background-color: #f3e5f5; color: #4a148c; }
     </style>
 </head>
 <body>
 
     <div class="container">
-        <h1>🍦 Heladería - Panel de Caja</h1>
-        <p class="sub">Verificación automática de transferencias</p>
+        <!-- Tarjeta Principal de Notificación -->
+        <div class="card">
+            <h1>🍦 Heladería - Control de Caja</h1>
+            <p class="subtitle">Verificación automática de transferencias y ventas</p>
 
-        <!-- Caja de Estado que cambia a Verde -->
-        <div id="pantallaEstado" class="status-box esperando">
-            ⏳ Esperando transferencia de Bancolombia...
+            <div id="estadoPago" class="status-box esperando">
+                ⏳ Esperando transferencia de Bancolombia / Nequi...
+            </div>
         </div>
 
-        <!-- Historial de las transferencias recibidas -->
-        <div class="historial">
-            <h3>Últimas transferencias confirmadas:</h3>
-            <div id="listaHistorial">
-                <!-- Se agregan dinámicamente -->
+        <!-- Registro Manual / Cobro -->
+        <div class="card">
+            <h2 style="font-size: 18px; text-align: left; margin-top: 0;">Registrar Cobro Manual</h2>
+            <div class="form-group">
+                <label for="monto">Monto ($ COP):</label>
+                <input type="number" id="monto" placeholder="Ej: 12000">
             </div>
+            <div class="form-group">
+                <label for="concepto">Detalle / Helado:</label>
+                <input type="text" id="concepto" placeholder="Ej: Cono 2 bolas + Malteada">
+            </div>
+            <button onclick="registrarVentaManual()">Registrar Pago Manual</button>
+        </div>
+
+        <!-- Historial y Contabilidad -->
+        <div class="card">
+            <h2 style="font-size: 18px; text-align: left; margin-top: 0;">Resumen del Día</h2>
+            <table>
+                <thead>
+                    <tr>
+                        <th>Hora</th>
+                        <th>Detalle</th>
+                        <th>Tipo</th>
+                        <th>Monto</th>
+                    </tr>
+                </thead>
+                <tbody id="tablaVentas">
+                    <!-- Aquí se irán agregando las ventas -->
+                </tbody>
+            </table>
         </div>
     </div>
 
     <script>
-        // Función para consultar al servidor en Render cada 2 segundos
-        setInterval(async () => {
-            try {
-                let respuesta = await fetch('/consultar-pago');
-                let datos = await respuesta.json();
+        // Función para simular o recibir un pago
+        function mostrarPago(monto, detalle, tipo) {
+            let caja = document.getElementById("estadoPago");
+            let hora = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
 
-                if (datos.nuevoPago) {
-                    mostrarPagoExitoso(datos.pago.monto, datos.pago.banco, datos.pago.fecha);
-                }
-            } catch (error) {
-                console.log("Conectando con el servidor...");
-            }
-        }, 2000);
+            // Cambiar caja a verde
+            caja.className = "status-box exitoso";
+            caja.innerHTML = `✅ ¡PAGO CONFIRMADO!<br>$${monto.toLocaleString()} COP<br><small style="font-weight:normal; font-size:14px;">${detalle}</small>`;
 
-        function mostrarPagoExitoso(monto, banco, hora) {
-            let pantalla = document.getElementById("pantallaEstado");
-            
-            // Cambiar pantalla a VERDE
-            pantalla.className = "status-box confirmado";
-            pantalla.innerHTML = `✅ ¡PAGO CONFIRMADO!<br>$${Number(monto).toLocaleString('es-CO')} COP<br><small style="font-size:14px; font-weight:normal;">Recibido desde ${banco}</small>`;
+            // Agregar a la tabla de contabilidad
+            let tabla = document.getElementById("tablaVentas");
+            let nuevaFila = `
+                <tr>
+                    <td>${hora}</td>
+                    <td>${detalle}</td>
+                    <td><span class="badge ${tipo === 'Automático' ? 'badge-auto' : 'badge-manual'}">${tipo}</span></td>
+                    <td><strong>$${monto.toLocaleString()}</strong></td>
+                </tr>
+            `;
+            tabla.innerHTML = nuevaFila + tabla.innerHTML;
 
-            // Agregar registro al historial de la pantalla
-            let lista = document.getElementById("listaHistorial");
-            let nuevoItem = document.createElement("div");
-            nuevoItem.className = "item-pago";
-            nuevoItem.innerHTML = `<span><strong>Hora:</strong> ${hora}</span> <span><strong>$${Number(monto).toLocaleString('es-CO')}</strong> (${banco})</span>`;
-            
-            lista.prepend(nuevoItem);
-
-            // Volver a estado de espera automáticamente después de 7 segundos
+            // Volver al estado de espera en 10 segundos
             setTimeout(() => {
-                pantalla.className = "status-box esperando";
-                pantalla.innerHTML = "⏳ Esperando transferencia de Bancolombia...";
-            }, 7000);
+                caja.className = "status-box esperando";
+                caja.innerHTML = "⏳ Esperando transferencia de Bancolombia / Nequi...";
+            }, 10000);
+        }
+
+        function registrarVentaManual() {
+            let montoInput = document.getElementById("monto").value;
+            let conceptoInput = document.getElementById("concepto").value || "Venta en efectivo / manual";
+
+            if (!montoInput || montoInput <= 0) {
+                alert("Por favor ingresa un monto válido");
+                return;
+            }
+
+            mostrarPago(parseInt(montoInput), conceptoInput, "Manual");
+
+            // Limpiar campos
+            document.getElementById("monto").value = "";
+            document.getElementById("concepto").value = "";
         }
     </script>
 
