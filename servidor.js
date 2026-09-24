@@ -1,23 +1,11 @@
 const express = require('express');
 const cors = require('cors');
-const Imap = require('node-imap');
-const { simpleParser } = require('mailparser');
 
 const app = express();
 app.use(cors());
 app.use(express.json());
 
 const PORT = process.env.PORT || 3000;
-
-// Configuración IMAP para Gmail
-const configImap = {
-    user: 'josear8647@gmail.com', // <--- Reemplaza con tu correo
-    password: 'eboosegtciponszm', // <--- Reemplaza con tu contraseña de 16 letras
-    host: 'imap.gmail.com',
-    port: 993,
-    tls: true,
-    tlsOptions: { rejectUnauthorized: false }
-};
 
 // Base de datos en memoria
 let pagoActual = { confirmado: false, monto: 0, fecha: null };
@@ -27,79 +15,36 @@ function getFechaHoy() {
     return new Date().toISOString().split('T')[0];
 }
 
-// Lógica de lectura automática de correos Bancolombia
-function iniciarEscuchaEmail() {
-    const imap = new Imap(configImap);
+// RUTA ULTRA RÁPIDA: Recibe el aviso directamente desde el celular o webhook
+app.post('/alerta-bancolombia', (req, res) => {
+    const { monto, referencia } = req.body;
+    
+    let montoNum = parseFloat(monto);
+    if (isNaN(montoNum) || montoNum <= 0) {
+        return res.status(400).json({ error: 'Monto no válido' });
+    }
 
-    imap.once('ready', () => {
-        imap.openBox('INBOX', false, (err, box) => {
-            if (err) return console.error('Error al abrir buzón:', err);
-            console.log('📬 Servidor escuchando transferencias de Bancolombia...');
+    const horaActual = new Date().toLocaleTimeString('es-CO', { hour: '2-digit', minute: '2-digit' });
 
-            imap.on('mail', () => {
-                const fetch = imap.seq.fetch(box.messages.total + ':*', { bodies: '' });
-                fetch.on('message', (msg) => {
-                    msg.on('body', (stream) => {
-                        simpleParser(stream, async (err, parsed) => {
-                            if (err) return;
+    pagoActual = {
+        confirmado: true,
+        monto: montoNum,
+        fecha: horaActual
+    };
 
-                            const texto = (parsed.text || '').toLowerCase();
-                            const asunto = (parsed.subject || '').toLowerCase();
-                            const contenidoCompleto = asunto + " " + texto;
-
-                            // Verifica si es un correo de entrada de dinero de Bancolombia
-                            if (contenidoCompleto.includes('recibiste') || contenidoCompleto.includes('transferencia') || contenidoCompleto.includes('consignacion')) {
-                                
-                                // Expresión regular ajustada para capturar montos como $3,000.00 o $200,000.00
-                                const coincidenciaMonto = parsed.text.match(/\$\s?([\d.,]+)/);
-                                if (coincidenciaMonto) {
-                                    let montoLimpio = coincidenciaMonto[1];
-                                    
-                                    // Manejo de formato numérico colombiano (100,000.00 o 100.000,00)
-                                    if (montoLimpio.includes('.') && montoLimpio.includes(',')) {
-                                        montoLimpio = montoLimpio.replace(/,/g, '');
-                                    } else if (montoLimpio.includes(',')) {
-                                        montoLimpio = montoLimpio.replace(/,/g, '');
-                                    }
-
-                                    const montoNum = parseFloat(montoLimpio);
-                                    const horaActual = new Date().toLocaleTimeString('es-CO', { hour: '2-digit', minute: '2-digit' });
-
-                                    if (!isNaN(montoNum) && montoNum > 0) {
-                                        pagoActual = {
-                                            confirmado: true,
-                                            monto: montoNum,
-                                            fecha: horaActual
-                                        };
-
-                                        registroVentas.push({
-                                            id: Date.now(),
-                                            monto: montoNum,
-                                            hora: horaActual,
-                                            tipo: 'Automática (Bancolombia)',
-                                            fechaCompleta: getFechaHoy()
-                                        });
-
-                                        console.log(`✅ Transferencia detectada de Bancolombia: $${montoNum}`);
-                                    }
-                                }
-                            }
-                        });
-                    });
-                });
-            });
-        });
+    registroVentas.push({
+        id: Date.now(),
+        monto: montoNum,
+        hora: horaActual,
+        tipo: referencia || 'Bancolombia / Nequi',
+        fechaCompleta: getFechaHoy()
     });
 
-    imap.once('error', (err) => console.error('Error IMAP:', err));
-    imap.once('end', () => setTimeout(iniciarEscuchaEmail, 5000));
-    imap.connect();
-}
+    console.log(`⚡ ¡Pago al instante recibido!: $${montoNum}`);
+    res.json({ status: 'ok', mensaje: 'Pago registrado al instante' });
+});
 
-iniciarEscuchaEmail();
-
-// RUTAS DE LA API
-
+// RUTAS DE LA API PARA LA PANTALLA
 app.get('/estado-pago', (req, res) => res.json(pagoActual));
 
 app.post('/limpiar-pago', (req, res) => {
@@ -136,7 +81,7 @@ app.post('/agregar-manual', (req, res) => {
     res.json({ status: 'ok', venta: nuevaVenta });
 });
 
-// INTERFAZ WEB COMPLETA EN LA RUTA PRINCIPAL (/)
+// INTERFAZ WEB COMPLETA (/)
 app.get('/', (req, res) => {
     res.send(`
 <!DOCTYPE html>
@@ -169,7 +114,7 @@ app.get('/', (req, res) => {
 <body>
     <div class="card">
         <h2>🍦 Heladería - Control de Caja</h2>
-        <p style="color: #666; margin-top: 0;">Verificación de Transferencias Bancolombia</p>
+        <p style="color: #666; margin-top: 0;">Verificación Instantánea de Transferencias</p>
         <div id="estadoPago" class="status esperando">⏳ Esperando transferencia...</div>
         <button id="btnLimpiar" style="display:none;" onclick="limpiarPantalla()">🔄 Confirmar y Siguiente Pago</button>
     </div>
@@ -255,7 +200,8 @@ app.get('/', (req, res) => {
             cargarVentasDia();
         }
 
-        setInterval(consultarPago, 3000);
+        // Revisa cada 1 segundo para respuesta inmediata
+        setInterval(consultarPago, 1000);
         cargarVentasDia();
     </script>
 </body>
@@ -264,5 +210,5 @@ app.get('/', (req, res) => {
 });
 
 app.listen(PORT, () => {
-    console.log(`Servidor corriendo en el puerto ${PORT}`);
+    console.log(`Servidor ultra rápido corriendo en puerto ${PORT}`);
 });
