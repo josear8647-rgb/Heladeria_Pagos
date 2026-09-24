@@ -7,20 +7,20 @@
     <style>
         * { box-sizing: border-box; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
         body { background-color: #f0f2f5; margin: 0; padding: 20px; display: flex; justify-content: center; }
-        .container { max-width: 600px; width: 100%; }
+        .container { max-width: 650px; width: 100%; }
         .card { background: white; border-radius: 12px; padding: 25px; box-shadow: 0 4px 15px rgba(0,0,0,0.08); margin-bottom: 20px; text-align: center; }
         h1 { margin-top: 0; color: #1a252c; font-size: 24px; }
         .subtitle { color: #65676b; font-size: 14px; margin-bottom: 20px; }
         
-        .status-box { padding: 20px; border-radius: 10px; font-size: 18px; font-weight: bold; margin-bottom: 20px; }
+        .status-box { padding: 20px; border-radius: 10px; font-size: 18px; font-weight: bold; margin-bottom: 20px; transition: all 0.3s ease; }
         .esperando { background-color: #fff8e1; color: #b78103; border: 2px dashed #ffe082; }
-        .exitoso { background-color: #e8f5e9; color: #2e7d32; border: 2px solid #a5d6a7; }
+        .exitoso { background-color: #e8f5e9; color: #2e7d32; border: 2px solid #a5d6a7; transform: scale(1.02); }
 
         .form-group { text-align: left; margin-bottom: 15px; }
         label { display: block; font-weight: 600; margin-bottom: 5px; color: #333; }
         input { width: 100%; padding: 10px; border: 1px solid #ccc; border-radius: 6px; font-size: 16px; }
         
-        button { width: 100%; padding: 12px; background-color: #007bff; color: white; border: none; border-radius: 6px; font-size: 16px; font-weight: bold; cursor: pointer; transition: 0.2s; }
+        button { width: 100%; padding: 12px; background-color: #007bff; color: white; border: none; border-radius: 6px; font-size: 16px; font-weight: bold; cursor: pointer; }
         button:hover { background-color: #0056b3; }
 
         table { width: 100%; border-collapse: collapse; margin-top: 15px; text-align: left; }
@@ -34,19 +34,19 @@
 <body>
 
     <div class="container">
-        <!-- Tarjeta Principal de Notificación -->
+        <!-- Panel Principal de Transferencias -->
         <div class="card">
             <h1>🍦 Heladería - Control de Caja</h1>
-            <p class="subtitle">Verificación automática de transferencias y ventas</p>
+            <p class="subtitle">Verificación automática de transferencias (Bancolombia / Nequi / Wompi)</p>
 
             <div id="estadoPago" class="status-box esperando">
-                ⏳ Esperando transferencia de Bancolombia / Nequi...
+                ⏳ Esperando transferencia...
             </div>
         </div>
 
-        <!-- Registro Manual / Cobro -->
+        <!-- Cobro / Registro Manual -->
         <div class="card">
-            <h2 style="font-size: 18px; text-align: left; margin-top: 0;">Registrar Cobro Manual</h2>
+            <h2 style="font-size: 18px; text-align: left; margin-top: 0;">Registrar Cobro Manual (Efectivo / Otro)</h2>
             <div class="form-group">
                 <label for="monto">Monto ($ COP):</label>
                 <input type="number" id="monto" placeholder="Ej: 12000">
@@ -58,9 +58,9 @@
             <button onclick="registrarVentaManual()">Registrar Pago Manual</button>
         </div>
 
-        <!-- Historial y Contabilidad -->
+        <!-- Tabla de Contabilidad del Día -->
         <div class="card">
-            <h2 style="font-size: 18px; text-align: left; margin-top: 0;">Resumen del Día</h2>
+            <h2 style="font-size: 18px; text-align: left; margin-top: 0;">Resumen de Ventas del Día</h2>
             <table>
                 <thead>
                     <tr>
@@ -71,19 +71,21 @@
                     </tr>
                 </thead>
                 <tbody id="tablaVentas">
-                    <!-- Aquí se irán agregando las ventas -->
+                    <!-- Aquí se irán acumulando los pagos -->
                 </tbody>
             </table>
         </div>
     </div>
 
     <script>
-        // Función para simular o recibir un pago
-        function mostrarPago(monto, detalle, tipo) {
-            let caja = document.getElementById("estadoPago");
-            let hora = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+        let ultimoIdProcesado = null;
 
-            // Cambiar caja a verde
+        // Función para mostrar el pago en pantalla y agregarlo a la tabla
+        function mostrarPago(monto, detalle, tipo, hora) {
+            let caja = document.getElementById("estadoPago");
+            let horaActual = hora || new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+
+            // Poner pantalla en verde
             caja.className = "status-box exitoso";
             caja.innerHTML = `✅ ¡PAGO CONFIRMADO!<br>$${monto.toLocaleString()} COP<br><small style="font-weight:normal; font-size:14px;">${detalle}</small>`;
 
@@ -91,7 +93,7 @@
             let tabla = document.getElementById("tablaVentas");
             let nuevaFila = `
                 <tr>
-                    <td>${hora}</td>
+                    <td>${horaActual}</td>
                     <td>${detalle}</td>
                     <td><span class="badge ${tipo === 'Automático' ? 'badge-auto' : 'badge-manual'}">${tipo}</span></td>
                     <td><strong>$${monto.toLocaleString()}</strong></td>
@@ -99,13 +101,32 @@
             `;
             tabla.innerHTML = nuevaFila + tabla.innerHTML;
 
-            // Volver al estado de espera en 10 segundos
+            // Volver al estado normal de espera después de 10 segundos
             setTimeout(() => {
                 caja.className = "status-box esperando";
-                caja.innerHTML = "⏳ Esperando transferencia de Bancolombia / Nequi...";
+                caja.innerHTML = "⏳ Esperando transferencia...";
             }, 10000);
         }
 
+        // Consultar continuamente al servidor si llegó un pago automático
+        async function consultarPagosAutomaticos() {
+            try {
+                let respuesta = await fetch('/api/ultimo-pago');
+                let datos = await respuesta.json();
+
+                if (datos && datos.id && datos.id !== ultimoIdProcesado) {
+                    ultimoIdProcesado = datos.id;
+                    mostrarPago(datos.monto, `${datos.banco} - ${datos.concepto}`, 'Automático', datos.fecha);
+                }
+            } catch (error) {
+                console.log("Esperando servidor...");
+            }
+        }
+
+        // Preguntar al servidor cada 2 segundos
+        setInterval(consultarPagosAutomaticos, 2000);
+
+        // Registro de ventas manuales
         function registrarVentaManual() {
             let montoInput = document.getElementById("monto").value;
             let conceptoInput = document.getElementById("concepto").value || "Venta en efectivo / manual";
@@ -117,7 +138,6 @@
 
             mostrarPago(parseInt(montoInput), conceptoInput, "Manual");
 
-            // Limpiar campos
             document.getElementById("monto").value = "";
             document.getElementById("concepto").value = "";
         }
