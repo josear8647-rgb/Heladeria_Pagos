@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Caja Heladería - Verificación de Pagos</title>
+    <title>Caja Heladería - Verificación y Contabilidad</title>
     <style>
         * { box-sizing: border-box; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
         body { background-color: #eef2f5; margin: 0; padding: 20px; display: flex; justify-content: center; align-items: center; min-height: 100vh; }
@@ -11,33 +11,34 @@
         h1 { margin-top: 0; color: #1e293b; font-size: 22px; }
         p.sub { color: #64748b; font-size: 14px; margin-bottom: 25px; }
 
-        /* Estado del Pago */
-        .status-box { padding: 30px 20px; border-radius: 14px; font-size: 20px; font-weight: bold; margin: 20px 0; transition: all 0.4s ease; }
+        .status-box { padding: 25px 20px; border-radius: 14px; font-size: 18px; font-weight: bold; margin: 20px 0; transition: all 0.4s ease; }
         .esperando { background-color: #fef3c7; color: #b45309; border: 2px dashed #f59e0b; }
         .confirmado { background-color: #d1fae5; color: #047857; border: 2px solid #10b981; transform: scale(1.02); }
 
-        /* Historial */
         .historial { margin-top: 25px; border-top: 1px solid #e2e8f0; padding-top: 15px; text-align: left; }
-        .historial h3 { font-size: 15px; color: #334155; margin-bottom: 12px; }
-        .item-pago { display: flex; justify-content: space-between; background: #f8fafc; padding: 10px 14px; border-radius: 8px; margin-bottom: 8px; font-size: 14px; border-left: 4px solid #10b981; }
+        .historial h3 { font-size: 15px; color: #334155; margin-bottom: 12px; display: flex; justify-content: space-between; align-items: center; }
+        .item-pago { display: flex; justify-content: space-between; background: #f8fafc; padding: 10px 14px; border-radius: 8px; margin-bottom: 8px; font-size: 13px; border-left: 4px solid #10b981; }
+        .total-box { background: #0f172a; color: white; padding: 12px; border-radius: 8px; font-weight: bold; margin-bottom: 15px; font-size: 16px; }
     </style>
 </head>
 <body>
 
     <div class="container">
         <h1>🍦 Heladería - Panel de Caja</h1>
-        <p class="sub">Verificación automática de transferencias</p>
+        <p class="sub">Verificación automática y Contabilidad</p>
 
-        <!-- Caja de Estado que cambia a Verde -->
         <div id="pantallaEstado" class="status-box esperando">
             ⏳ Esperando transferencia de Bancolombia...
         </div>
 
-        <!-- Historial de las transferencias recibidas -->
         <div class="historial">
-            <h3>Últimas transferencias confirmadas:</h3>
+            <div id="totalAcumulado" class="total-box">
+                Total acumulado: $0 COP
+            </div>
+
+            <h3>Historial de transferencias:</h3>
             <div id="listaHistorial">
-                <!-- Se agregan dinámicamente -->
+                <!-- Se cargan automáticamente -->
             </div>
         </div>
     </div>
@@ -45,7 +46,33 @@
     <script>
         let temporizadorLimpieza = null;
 
-        // Consultar constantemente al servidor cada 2 segundos
+        // Cargar todo el historial al abrir la página
+        async function cargarHistorialGuardado() {
+            try {
+                let respuesta = await fetch('/historial');
+                let datos = await respuesta.json();
+                let lista = document.getElementById("listaHistorial");
+                lista.innerHTML = "";
+
+                let total = 0;
+
+                datos.historial.forEach(pago => {
+                    let montoFormateado = isNaN(pago.monto) ? pago.monto : `$${Number(pago.monto).toLocaleString('es-CO')} COP`;
+                    if (!isNaN(pago.monto)) total += Number(pago.monto);
+
+                    let item = document.createElement("div");
+                    item.className = "item-pago";
+                    item.innerHTML = `<span>${pago.fecha}</span> <span><strong>${montoFormateado}</strong> (${pago.banco})</span>`;
+                    lista.appendChild(item);
+                });
+
+                document.getElementById("totalAcumulado").innerText = `Total acumulado: $${total.toLocaleString('es-CO')} COP`;
+            } catch (e) {
+                console.log("Error al cargar historial:", e);
+            }
+        }
+
+        // Consultar pagos nuevos cada 2 segundos
         setInterval(async () => {
             try {
                 let respuesta = await fetch('/consultar-pago');
@@ -53,39 +80,30 @@
 
                 if (datos.nuevoPago) {
                     mostrarPagoExitoso(datos.pago.monto, datos.pago.banco, datos.pago.fecha);
+                    cargarHistorialGuardado();
                 }
             } catch (error) {
-                console.log("Reconectando con el servidor...");
+                console.log("Reconectando...");
             }
         }, 2000);
 
         function mostrarPagoExitoso(monto, banco, hora) {
             let pantalla = document.getElementById("pantallaEstado");
-            
-            // Formato monetario en pesos colombianos
             let montoFormateado = isNaN(monto) ? monto : `$${Number(monto).toLocaleString('es-CO')} COP`;
 
-            // Cambiar pantalla a VERDE
             pantalla.className = "status-box confirmado";
-            pantalla.innerHTML = `✅ ¡PAGO CONFIRMADO!<br>${montoFormateado}<br><small style="font-size:14px; font-weight:normal;">Recibido desde ${banco}</small>`;
+            pantalla.innerHTML = `✅ ¡PAGO CONFIRMADO!<br>${montoFormateado}<br><small style="font-size:13px; font-weight:normal;">Recibido desde ${banco}</small>`;
 
-            // Agregar el registro al historial visual
-            let lista = document.getElementById("listaHistorial");
-            let nuevoItem = document.createElement("div");
-            nuevoItem.className = "item-pago";
-            nuevoItem.innerHTML = `<span><strong>Hora:</strong> ${hora}</span> <span><strong>${montoFormateado}</strong> (${banco})</span>`;
-            
-            lista.prepend(nuevoItem);
-
-            // Reiniciar temporizador si entra otro pago seguido
             if (temporizadorLimpieza) clearTimeout(temporizadorLimpieza);
 
-            // Volver automáticamente al estado de espera tras 8 segundos
             temporizadorLimpieza = setTimeout(() => {
                 pantalla.className = "status-box esperando";
                 pantalla.innerHTML = "⏳ Esperando transferencia de Bancolombia...";
             }, 8000);
         }
+
+        // Cargar apenas abra la página
+        cargarHistorialGuardado();
     </script>
 
 </body>

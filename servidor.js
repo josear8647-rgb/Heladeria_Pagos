@@ -1,98 +1,118 @@
 const express = require('express');
 const path = require('path');
+const fs = require('fs');
 
 const app = express();
 
-// Permitir que el servidor entienda datos en formato JSON y texto
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
-
-// Servir la página web del cajero (index.html)
 app.use(express.static(path.join(__dirname)));
 
-// Variable en memoria para guardar temporalmente el último pago recibido
-let ultimoPagoRegistrado = null;
+const ARCHIVO_HISTORIAL = path.join(__dirname, 'contabilidad.json');
 
-// RUTA WEBHOOK: Recibe los datos enviados desde Make, MacroDroid o pruebas manuales
-// Acepta tanto /webhook como /alerta-bancolombia
+// Función para cargar el historial guardado en el archivo
+function cargarHistorial() {
+    try {
+        if (fs.existsSync(ARCHIVO_HISTORIAL)) {
+            const datos = fs.readFileSync(ARCHIVO_HISTORIAL, 'utf8');
+            return JSON.parse(datos);
+        }
+    } catch (error) {
+        console.error("Error al leer contabilidad.json:", error);
+    }
+    return [];
+}
+
+// Función para guardar permanentemente en el archivo
+function guardarHistorial(historial) {
+    try {
+        fs.writeFileSync(ARCHIVO_HISTORIAL, JSON.stringify(historial, null, 2), 'utf8');
+    } catch (error) {
+        console.error("Error al guardar contabilidad.json:", error);
+    }
+}
+
+let ultimoPagoRegistrado = null;
+let historialPagos = cargarHistorial(); // Carga las ventas anteriores guardadas
+
+// RUTA WEBHOOK
 app.post(['/webhook', '/alerta-bancolombia'], (req, res) => {
-    console.log("------------------------------------------------");
-    console.log("🔔 ¡NUEVA NOTIFICACIÓN / BANCO RECIBIDA!");
-    console.log("Datos recibidos:", JSON.stringify(req.body, null, 2));
+    console.log("--------------------------------------------------");
+    console.log("🔔 ¡NUEVA TRANSFERENCIA DETECTADA!");
 
     let textoNotificacion = "";
     let montoDetectado = 0;
     let bancoDetectado = "Bancolombia";
 
-    // 1. Extraer el texto disponible desde los datos enviados
     if (req.body) {
         if (typeof req.body === 'string') {
             textoNotificacion = req.body;
         } else {
-            // Revisa si Make o el correo enviaron texto en diferentes campos
-            textoNotificacion = req.body.monto || req.body.texto || req.body.text || req.body.subject || req.body.body || JSON.stringify(req.body);
+            textoNotificacion = req.body.monto || req.body.texto || req.body.text || 
+                                req.body.subject || req.body.body || JSON.stringify(req.body);
         }
     }
 
-    // 2. Buscar dinámicamente un valor en dinero dentro del texto (Ej: $12.000, 12,000 COP, etc.)
     let coincidencia = textoNotificacion.match(/\$?\s*([\d\.\,]+)/);
 
     if (coincidencia && coincidencia[1]) {
-        // Limpiamos los puntos o comas para obtener el número entero
         let numeroLimpio = coincidencia[1].replace(/\./g, '').replace(',', '');
-        let valorEfectivo = parseInt(numeroLimpio, 10);
+        let valorNumerico = parseInt(numeroLimpio, 10);
 
-        // Validamos que sea un número coherente
-        if (!isNaN(valorEfectivo) && valorEfectivo > 0) {
-            montoDetectado = valorEfectivo;
+        if (!isNaN(valorNumerico) && valorNumerico > 0) {
+            montoDetectado = valorNumerico;
         }
     }
 
-    // Si Make envió directamente un número claro en la variable 'monto'
     if (typeof req.body.monto === 'number') {
         montoDetectado = req.body.monto;
     }
 
-    // Identificar banco si viene en la petición
     if (req.body.banco) {
         bancoDetectado = req.body.banco;
     }
 
-    // Si encontramos un monto válido, guardamos la transferencia
     if (montoDetectado > 0) {
-        ultimoPagoRegistrado = {
+        let nuevoPago = {
+            id: Date.now(),
             monto: montoDetectado,
             banco: bancoDetectado,
-            fecha: new Date().toLocaleTimeString('es-CO')
+            fecha: new Date().toLocaleDateString('es-CO') + ' ' + new Date().toLocaleTimeString('es-CO', { timeZone: 'America/Bogota' })
         };
-        console.log(`✅ ¡PAGO EXTRAÍDO CON ÉXITO! Monto: $${montoDetectado} COP`);
-    } else {
-        console.log("⚠️ Se recibió la alerta pero no se pudo extraer un monto numérico válido.");
+
+        ultimoPagoRegistrado = nuevoPago;
+        historialPagos.unshift(nuevoPago);
+
+        // Guardar permanentemente en disco
+        guardarHistorial(historialPagos);
+
+        console.log(`✅ ¡PAGO DE $${montoDetectado} GUARDADO EN CONTABILIDAD!`);
     }
 
-    // Responder a Make / Cliente HTTP con respuesta exitosa
-    res.status(200).send('Notificación recibida y procesada correctamente');
+    res.status(200).send('Procesado');
 });
 
-// RUTA CONSULTA: La pantalla consulta esta ruta constantemente para actualizarse
+// Consultar último pago para la alerta verde
 app.get('/consultar-pago', (req, res) => {
     if (ultimoPagoRegistrado) {
         let pagoAEnviar = ultimoPagoRegistrado;
-        ultimoPagoRegistrado = null; // Se borra para no repetir la alerta en pantalla
+        ultimoPagoRegistrado = null;
         res.json({ nuevoPago: true, pago: pagoAEnviar });
     } else {
         res.json({ nuevoPago: false });
     }
 });
 
-// Ruta principal para cargar el archivo HTML
+// Consultar todo el historial guardado
+app.get('/historial', (req, res) => {
+    res.json({ historial: historialPagos });
+});
+
 app.get('/', (req, res) => {
     res.sendFile(path.join(__dirname, 'index.html'));
 });
 
-// Configuración de puerto para Render o entorno local
 const PORT = process.env.PORT || 3000;
-
 app.listen(PORT, () => {
-    console.log(`🚀 Servidor ejecutándose en el puerto ${PORT}`);
+    console.log(`🚀 Servidor escuchando en el puerto ${PORT}`);
 });
