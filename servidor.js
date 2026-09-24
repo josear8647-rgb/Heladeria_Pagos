@@ -83,7 +83,7 @@ async function revisarCorreos() {
 }
 
 // Revisa cada 20 segundos para ahorrar memoria RAM en Render
-setInterval(revisarCorreos, 20000);
+setInterval(revisarCorreos, 5000);
 
 app.get('/', (req, res) => {
     res.sendFile(path.join(__dirname, 'index.html'));
