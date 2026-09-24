@@ -1,54 +1,97 @@
 const express = require('express');
-const path = require('path');
+const cors = require('cors');
+const Imap = require('node-imap');
+const { simpleParser } = require('mailparser');
 
 const app = express();
-
-// Permitir que el servidor lea datos en formato JSON
+app.use(cors());
 app.use(express.json());
 
-// Servir la página web del cajero (index.html)
-app.use(express.static(path.join(__dirname)));
+// Guardamos el estado del último pago
+let ultimoPago = {
+    confirmado: false,
+    monto: 0,
+    fecha: null
+};
 
-// Variable en memoria para guardar temporalmente el último pago recibido
-let ultimoPagoRegistrado = null;
+// Configuración de Gmail
+// (Reemplaza con el correo de la heladería y la contraseña de 16 letras de Google)
+const configImap = {
+    user: 'josear8647@gmail.com',
+    password: 'ucqx fdqp hfmm czvd',
+    host: 'imap.gmail.com',
+    port: 993,
+    tls: true,
+    tlsOptions: { rejectUnauthorized: false }
+};
 
-// RUTA WEBHOOK: Aquí entran las notificaciones de transferencia (Thunder Client o Banco)
-app.post('/webhook', (req, res) => {
-    const { monto, banco } = req.body;
+function revisarCorreos() {
+    const imap = new Imap(configImap);
 
-    console.log("🔔 ¡NUEVA TRANSFERENCIA RECIBIDA!");
-    console.log("Datos:", req.body);
+    imap.once('ready', function() {
+        imap.openBox('INBOX', false, function(err, box) {
+            if (err) return;
 
-    // Guardamos la transferencia recibida
-    ultimoPagoRegistrado = {
-        monto: monto || 12000,
-        banco: banco || 'Bancolombia',
-        fecha: new Date().toLocaleTimeString('es-CO')
-    };
+            // Buscamos correos NO LEÍDOS recibidos de Bancolombia
+            imap.search(['UNSEEN', ['HEADER', 'FROM', 'bancolombia']], function(err, results) {
+                if (err || !results.length) {
+                    imap.end();
+                    return;
+                }
 
-    // Confirmación que recibe Thunder Client
-    res.status(200).send('Webhook recibido con éxito');
+                const f = imap.fetch(results, { bodies: '' });
+                f.on('message', function(msg) {
+                    msg.on('body', function(stream) {
+                        simpleParser(stream, async (err, parsed) => {
+                            const texto = parsed.text || '';
+                            
+                            // Buscamos si el correo habla de una transferencia o recibo de dinero
+                            if (texto.includes('recibió') || texto.includes('transferencia') || texto.includes('Abono')) {
+                                console.log('¡Nuevo pago detectado desde Bancolombia!');
+                                
+                                // Extraer el monto si es posible
+                                const coincidenciaMonto = texto.match(/\$\s*([\d\.,]+)/);
+                                const monto = coincidenciaMonto ? coincidenciaMonto[1] : 'Confirmado';
+
+                                ultimoPago = {
+                                    confirmado: true,
+                                    monto: monto,
+                                    fecha: new Date().toLocaleTimeString()
+                                };
+                            }
+                        });
+                    });
+                });
+
+                f.once('end', function() {
+                    imap.end();
+                });
+            });
+        });
+    });
+
+    imap.once('error', function(err) {
+        console.log('Error en IMAP:', err.message);
+    });
+
+    imap.connect();
+}
+
+// Revisar correos automáticamente cada 5 segundos
+setInterval(revisarCorreos, 5000);
+
+// Endpoint que la pantalla del cajero consulta constantemente
+app.get('/estado-pago', (req, res) => {
+    res.json(ultimoPago);
 });
 
-// RUTA CONSULTA: La página web llamará a esta ruta cada 2 segundos para ver si hay un pago nuevo
-app.get('/consultar-pago', (req, res) => {
-    if (ultimoPagoRegistrado) {
-        let pagoAEnviar = ultimoPagoRegistrado;
-        ultimoPagoRegistrado = null; // Se limpia para que no repita la alerta indefinidamente
-        res.json({ nuevoPago: true, pago: pagoAEnviar });
-    } else {
-        res.json({ nuevoPago: false });
-    }
+// Endpoint para reiniciar la pantalla para la siguiente venta
+app.post('/limpiar-pago', (req, res) => {
+    ultimoPago = { confirmado: false, monto: 0, fecha: null };
+    res.json({ status: 'ok' });
 });
 
-// Ruta principal para cargar la pantalla
-app.get('/', (req, res) => {
-    res.sendFile(path.join(__dirname, 'index.html'));
-});
-
-// Configuración de puerto dinámico para Render
 const PORT = process.env.PORT || 3000;
-
 app.listen(PORT, () => {
-    console.log(`🚀 Servidor ejecutándose en el puerto ${PORT}`);
+    console.log(`Servidor de la heladería corriendo en el puerto ${PORT}`);
 });
