@@ -8,7 +8,6 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
-// Estado en memoria de la última transferencia recibida
 let ultimoPago = {
     monto: 0,
     estado: 'esperando',
@@ -18,38 +17,42 @@ let ultimoPago = {
 // Configuración de credenciales de Gmail
 const configGmail = {
     imap: {
-        user: 'josear8647@gmail.com', // 👈 Reemplaza por tu correo de Gmail
-        password: 'ucqx fdqp hfmm czvd', // 👈 Reemplaza por tu clave de aplicación de 16 letras de Google
+        user: 'TU_CORREO_AQUI@gmail.com', // 👈 Pon tu correo
+        password: 'xxxx xxxx xxxx xxxx', // 👈 Pon tu clave de aplicación de 16 letras
         host: 'imap.gmail.com',
         port: 993,
         tls: true,
-        authTimeout: 30000,
+        authTimeout: 10000,
         tlsOptions: { rejectUnauthorized: false }
     }
 };
 
-// Función principal para escanear correos no leídos
+let revisando = false;
+
 async function revisarCorreos() {
+    if (revisando) return; // Evita acumular tareas si una revisión tarda
+    revisando = true;
+
+    let connection;
     try {
-        const connection = await imaps.connect(configGmail);
+        connection = await imaps.connect(configGmail);
         await connection.openBox('INBOX');
 
-        // Busca solo correos no leídos (UNSEEN)
+        // Solo busca correos NO leídos
         const searchCriteria = ['UNSEEN'];
-        const fetchOptions = { bodies: ['HEADER', 'TEXT', ''], markSeen: true };
+        const fetchOptions = { bodies: ['HEADER', 'TEXT'], markSeen: true };
 
         const messages = await connection.search(searchCriteria, fetchOptions);
 
         for (let item of messages) {
-            const all = item.parts.find(part => part.which === '');
-            const parsed = await simpleParser(all.body);
+            const textPart = item.parts.find(part => part.which === 'TEXT');
+            const headerPart = item.parts.find(part => part.which === 'HEADER');
 
-            const asunto = parsed.subject || '';
-            const texto = parsed.text || '';
+            const asunto = headerPart?.body?.subject?.[0] || '';
+            const texto = textPart?.body || '';
 
-            console.log('📬 Nuevo correo detectado:', asunto);
+            console.log('📬 Correo no leído detectado:', asunto);
 
-            // Verificación si proviene de alertas de Bancolombia o Nequi
             const esBancolombiaONequi = 
                 asunto.toLowerCase().includes('transferencia') || 
                 asunto.toLowerCase().includes('recibiste') || 
@@ -57,15 +60,10 @@ async function revisarCorreos() {
                 texto.toLowerCase().includes('nequi');
 
             if (esBancolombiaONequi) {
-                // Expresión regular para extraer montos (ej: $12.000, $12000, 12.000 COP)
                 const coincidenciaMonto = texto.match(/\$\s?([0-9.,]+)/) || texto.match(/([0-9.,]+)\s?COP/);
+                let montoDetectado = coincidenciaMonto ? coincidenciaMonto[0] : 'Confirmado';
 
-                let montoDetectado = 'Confirmado';
-                if (coincidenciaMonto) {
-                    montoDetectado = coincidenciaMonto[0];
-                }
-
-                console.log(`✅ ¡Pago confirmado! Monto: ${montoDetectado}`);
+                console.log(`✅ ¡Pago detectado!: ${montoDetectado}`);
 
                 ultimoPago = {
                     monto: montoDetectado,
@@ -74,33 +72,33 @@ async function revisarCorreos() {
                 };
             }
         }
-
-        connection.end();
     } catch (error) {
-        console.error('Error en la conexión o lectura de Gmail:', error.message);
+        console.error('Error al revisar correo:', error.message);
+    } finally {
+        if (connection) {
+            try { connection.end(); } catch(e) {}
+        }
+        revisando = false;
     }
 }
 
-// Revisa la bandeja de entrada automáticamente cada 10 segundos
-setInterval(revisarCorreos, 10000);
+// Revisa cada 20 segundos para ahorrar memoria RAM en Render
+setInterval(revisarCorreos, 20000);
 
-// Ruta para cargar la página web principal
 app.get('/', (req, res) => {
     res.sendFile(path.join(__dirname, 'index.html'));
 });
 
-// Endpoint que consulta la pantalla del cajero en tiempo real
 app.get('/estado-pago', (req, res) => {
     res.json(ultimoPago);
 });
 
-// Endpoint para reiniciar la caja a "Esperando"
 app.post('/reiniciar', (req, res) => {
     ultimoPago = { monto: 0, estado: 'esperando', fecha: null };
     res.json({ mensaje: 'Caja reiniciada' });
 });
 
-const PORT = process.env.PORT || 3000;
+const PORT = process.env.PORT || 10000;
 app.listen(PORT, () => {
-    console.log(`🚀 Servidor de la Heladería escuchando en el puerto ${PORT}`);
+    console.log(`🚀 Servidor listo en puerto ${PORT}`);
 });
