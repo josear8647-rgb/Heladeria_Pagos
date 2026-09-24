@@ -17,8 +17,8 @@ let ultimoPago = {
 // Configuración de credenciales de Gmail
 const configGmail = {
     imap: {
-        user: 'TU_CORREO_AQUI@gmail.com', // 👈 Pon tu correo
-        password: 'xxxx xxxx xxxx xxxx', // 👈 Pon tu clave de aplicación de 16 letras
+        user: 'josear8647@gmail.com', // 👈 Pon tu correo
+        password: 'znipmuntqwnculhf', // 👈 Pon tu clave de aplicación de 16 letras
         host: 'imap.gmail.com',
         port: 993,
         tls: true,
