@@ -2,13 +2,11 @@ const express = require('express');
 const cors = require('cors');
 const imaps = require('imap-simple');
 const { simpleParser } = require('mailparser');
+const path = require('path');
 
 const app = express();
 app.use(cors());
 app.use(express.json());
-
-// Sirve los archivos estáticos (tu página web)
-app.use(express.static('public'));
 
 let ultimoPago = {
     monto: 0,
@@ -16,11 +14,11 @@ let ultimoPago = {
     fecha: null
 };
 
-// Configuración para conectarse a tu Gmail
+// Configuración de conexión con tu cuenta de Gmail
 const configGmail = {
     imap: {
-        user: 'TU_CORREO_AQUI@gmail.com', // 👈 Escribe aquí tu correo de Gmail
-        password: 'xxxx xxxx xxxx xxxx', // 👈 Pega aquí la clave de 16 letras
+        user: 'TU_CORREO_AQUI@gmail.com', // 👈 Reemplaza por tu correo de Gmail
+        password: 'xxxx xxxx xxxx xxxx', // 👈 Reemplaza por tu contraseña de aplicación de 16 letras
         host: 'imap.gmail.com',
         port: 993,
         tls: true,
@@ -29,13 +27,12 @@ const configGmail = {
     }
 };
 
-// Función para revisar los correos de Bancolombia / Nequi
+// Función que revisa los correos no leídos en búsqueda de transferencias
 async function revisarCorreos() {
     try {
         const connection = await imaps.connect(configGmail);
         await connection.openBox('INBOX');
 
-        // Busca correos no leídos que contengan palabras de transferencia
         const searchCriteria = ['UNSEEN'];
         const fetchOptions = { bodies: ['HEADER', 'TEXT', ''], markSeen: true };
 
@@ -48,11 +45,10 @@ async function revisarCorreos() {
             const asunto = parsed.subject || '';
             const texto = parsed.text || '';
 
-            console.log('📬 Nuevo correo recibido:', asunto);
+            console.log('📬 Nuevo correo detectado:', asunto);
 
-            // Filtramos si el correo viene de Bancolombia o Nequi
+            // Verificación de mensajes provenientes de Bancolombia o Nequi
             if (asunto.includes('Transferencia') || asunto.includes('Recibiste') || texto.includes('Bancolombia') || texto.includes('Nequi')) {
-                // Buscamos un monto de dinero dentro del texto (ej: $12.000 o 12000)
                 const coincidenciaMonto = texto.match(/\$\s?([0-9.,]+)/) || texto.match(/([0-9.,]+)\s?COP/);
 
                 let montoDetectado = 'Confirmado';
@@ -60,7 +56,7 @@ async function revisarCorreos() {
                     montoDetectado = coincidenciaMonto[0];
                 }
 
-                console.log(`✅ ¡Pago detectado! Monto: ${montoDetectado}`);
+                console.log(`✅ ¡Pago confirmado! Monto: ${montoDetectado}`);
 
                 ultimoPago = {
                     monto: montoDetectado,
@@ -72,19 +68,24 @@ async function revisarCorreos() {
 
         connection.end();
     } catch (error) {
-        console.error('Error al revisar el correo:', error.message);
+        console.error('Error al consultar el correo:', error.message);
     }
 }
 
-// Revisa el correo automáticamente cada 10 segundos
+// Ejecuta la revisión automática cada 10 segundos
 setInterval(revisarCorreos, 10000);
 
-// Ruta para que la página de la caja consulte el estado del pago
+// Ruta principal para servir el archivo index.html
+app.get('/', (req, res) => {
+    res.sendFile(path.join(__dirname, 'index.html'));
+});
+
+// Ruta API para obtener el estado actual del pago
 app.get('/estado-pago', (req, res) => {
     res.json(ultimoPago);
 });
 
-// Ruta para reiniciar el estado de la caja a "Esperando"
+// Ruta API para reiniciar la caja para el siguiente cliente
 app.post('/reiniciar', (req, res) => {
     ultimoPago = { monto: 0, estado: 'esperando', fecha: null };
     res.json({ mensaje: 'Caja reiniciada' });
@@ -92,5 +93,5 @@ app.post('/reiniciar', (req, res) => {
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
-    console.log(`🚀 Servidor ejecutándose en el puerto ${PORT}`);
+    console.log(`🚀 Servidor activo en el puerto ${PORT}`);
 });
