@@ -1,118 +1,104 @@
 const express = require('express');
+const cors = require('cors');
+const imaps = require('imap-simple');
+const { simpleParser } = require('mailparser');
 const path = require('path');
-const fs = require('fs');
 
 const app = express();
-
+app.use(cors());
 app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
-app.use(express.static(path.join(__dirname)));
 
-const ARCHIVO_HISTORIAL = path.join(__dirname, 'contabilidad.json');
+let ultimoPago = {
+    monto: 0,
+    estado: 'esperando',
+    fecha: null
+};
 
-// Función para cargar el historial guardado en el archivo
-function cargarHistorial() {
+// Configuración de credenciales de Gmail
+const configGmail = {
+    imap: {
+        user: 'josear8647@gmail.com', // 👈 Pon tu correo
+        password: 'znipmuntqwnculhf', // 👈 Pon tu clave de aplicación de 16 letras
+        host: 'imap.gmail.com',
+        port: 993,
+        tls: true,
+        authTimeout: 10000,
+        tlsOptions: { rejectUnauthorized: false }
+    }
+};
+
+let revisando = false;
+
+async function revisarCorreos() {
+    if (revisando) return; // Evita acumular tareas si una revisión tarda
+    revisando = true;
+
+    let connection;
     try {
-        if (fs.existsSync(ARCHIVO_HISTORIAL)) {
-            const datos = fs.readFileSync(ARCHIVO_HISTORIAL, 'utf8');
-            return JSON.parse(datos);
+        connection = await imaps.connect(configGmail);
+        await connection.openBox('INBOX');
+
+        // Solo busca correos NO leídos
+        const searchCriteria = ['UNSEEN'];
+        const fetchOptions = { bodies: ['HEADER', 'TEXT'], markSeen: true };
+
+        const messages = await connection.search(searchCriteria, fetchOptions);
+
+        for (let item of messages) {
+            const textPart = item.parts.find(part => part.which === 'TEXT');
+            const headerPart = item.parts.find(part => part.which === 'HEADER');
+
+            const asunto = headerPart?.body?.subject?.[0] || '';
+            const texto = textPart?.body || '';
+
+            console.log('📬 Correo no leído detectado:', asunto);
+
+            const esBancolombiaONequi = 
+                asunto.toLowerCase().includes('transferencia') || 
+                asunto.toLowerCase().includes('recibiste') || 
+                texto.toLowerCase().includes('bancolombia') || 
+                texto.toLowerCase().includes('nequi');
+
+            if (esBancolombiaONequi) {
+                const coincidenciaMonto = texto.match(/\$\s?([0-9.,]+)/) || texto.match(/([0-9.,]+)\s?COP/);
+                let montoDetectado = coincidenciaMonto ? coincidenciaMonto[0] : 'Confirmado';
+
+                console.log(`✅ ¡Pago detectado!: ${montoDetectado}`);
+
+                ultimoPago = {
+                    monto: montoDetectado,
+                    estado: 'pagado',
+                    fecha: new Date().toLocaleTimeString('es-CO', { timeZone: 'America/Bogota' })
+                };
+            }
         }
     } catch (error) {
-        console.error("Error al leer contabilidad.json:", error);
-    }
-    return [];
-}
-
-// Función para guardar permanentemente en el archivo
-function guardarHistorial(historial) {
-    try {
-        fs.writeFileSync(ARCHIVO_HISTORIAL, JSON.stringify(historial, null, 2), 'utf8');
-    } catch (error) {
-        console.error("Error al guardar contabilidad.json:", error);
+        console.error('Error al revisar correo:', error.message);
+    } finally {
+        if (connection) {
+            try { connection.end(); } catch(e) {}
+        }
+        revisando = false;
     }
 }
 
-let ultimoPagoRegistrado = null;
-let historialPagos = cargarHistorial(); // Carga las ventas anteriores guardadas
-
-// RUTA WEBHOOK
-app.post(['/webhook', '/alerta-bancolombia'], (req, res) => {
-    console.log("--------------------------------------------------");
-    console.log("🔔 ¡NUEVA TRANSFERENCIA DETECTADA!");
-
-    let textoNotificacion = "";
-    let montoDetectado = 0;
-    let bancoDetectado = "Bancolombia";
-
-    if (req.body) {
-        if (typeof req.body === 'string') {
-            textoNotificacion = req.body;
-        } else {
-            textoNotificacion = req.body.monto || req.body.texto || req.body.text || 
-                                req.body.subject || req.body.body || JSON.stringify(req.body);
-        }
-    }
-
-    let coincidencia = textoNotificacion.match(/\$?\s*([\d\.\,]+)/);
-
-    if (coincidencia && coincidencia[1]) {
-        let numeroLimpio = coincidencia[1].replace(/\./g, '').replace(',', '');
-        let valorNumerico = parseInt(numeroLimpio, 10);
-
-        if (!isNaN(valorNumerico) && valorNumerico > 0) {
-            montoDetectado = valorNumerico;
-        }
-    }
-
-    if (typeof req.body.monto === 'number') {
-        montoDetectado = req.body.monto;
-    }
-
-    if (req.body.banco) {
-        bancoDetectado = req.body.banco;
-    }
-
-    if (montoDetectado > 0) {
-        let nuevoPago = {
-            id: Date.now(),
-            monto: montoDetectado,
-            banco: bancoDetectado,
-            fecha: new Date().toLocaleDateString('es-CO') + ' ' + new Date().toLocaleTimeString('es-CO', { timeZone: 'America/Bogota' })
-        };
-
-        ultimoPagoRegistrado = nuevoPago;
-        historialPagos.unshift(nuevoPago);
-
-        // Guardar permanentemente en disco
-        guardarHistorial(historialPagos);
-
-        console.log(`✅ ¡PAGO DE $${montoDetectado} GUARDADO EN CONTABILIDAD!`);
-    }
-
-    res.status(200).send('Procesado');
-});
-
-// Consultar último pago para la alerta verde
-app.get('/consultar-pago', (req, res) => {
-    if (ultimoPagoRegistrado) {
-        let pagoAEnviar = ultimoPagoRegistrado;
-        ultimoPagoRegistrado = null;
-        res.json({ nuevoPago: true, pago: pagoAEnviar });
-    } else {
-        res.json({ nuevoPago: false });
-    }
-});
-
-// Consultar todo el historial guardado
-app.get('/historial', (req, res) => {
-    res.json({ historial: historialPagos });
-});
+// Revisa cada 20 segundos para ahorrar memoria RAM en Render
+setInterval(revisarCorreos, 5000);
 
 app.get('/', (req, res) => {
     res.sendFile(path.join(__dirname, 'index.html'));
 });
 
-const PORT = process.env.PORT || 3000;
+app.get('/estado-pago', (req, res) => {
+    res.json(ultimoPago);
+});
+
+app.post('/reiniciar', (req, res) => {
+    ultimoPago = { monto: 0, estado: 'esperando', fecha: null };
+    res.json({ mensaje: 'Caja reiniciada' });
+});
+
+const PORT = process.env.PORT || 10000;
 app.listen(PORT, () => {
-    console.log(`🚀 Servidor escuchando en el puerto ${PORT}`);
+    console.log(`🚀 Servidor listo en puerto ${PORT}`);
 });
