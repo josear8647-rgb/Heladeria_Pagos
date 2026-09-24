@@ -3,59 +3,181 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Heladería - Verificación de Pagos</title>
+    <title>Caja Heladería - Control de Pagos</title>
     <style>
-        body { font-family: Arial, sans-serif; background-color: #f4f6f9; text-align: center; padding: 20px; }
-        .card { background: white; max-width: 450px; margin: 30px auto; padding: 25px; border-radius: 12px; box-shadow: 0 4px 10px rgba(0,0,0,0.1); }
-        .status { padding: 20px; font-size: 22px; font-weight: bold; border-radius: 8px; margin-top: 20px; }
-        .pagado { background-color: #d4edda; color: #155724; border: 2px solid #c3e6cb; }
-        .esperando { background-color: #fff3cd; color: #856404; border: 2px solid #ffeeba; }
-        button { margin-top: 20px; padding: 12px 24px; font-size: 16px; font-weight: bold; border-radius: 6px; border: none; background: #0d6efd; color: white; cursor: pointer; }
-        button:hover { background: #0b5ed7; }
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: #f4f7f6; margin: 0; padding: 20px; text-align: center; }
+        .container { max-width: 520px; margin: 0 auto; }
+        .card { background: white; padding: 25px; border-radius: 16px; box-shadow: 0 8px 20px rgba(0,0,0,0.06); margin-bottom: 20px; }
+        h2 { color: #2c3e50; margin: 0 0 10px 0; }
+        .status { padding: 25px; font-size: 22px; font-weight: bold; border-radius: 12px; margin: 15px 0; transition: all 0.3s ease; }
+        .esperando { background-color: #fff8e1; color: #b78103; border: 2px solid #ffe082; }
+        .pagado { background-color: #d4edda; color: #155724; border: 2px solid #c3e6cb; animation: pop 0.4s ease-out; }
+        
+        button { background-color: #2563eb; color: white; border: none; padding: 12px 20px; font-size: 16px; border-radius: 10px; cursor: pointer; font-weight: bold; margin: 5px; }
+        button:hover { background-color: #1d4ed8; }
+        .btn-manual { background-color: #059669; width: 95%; margin-top: 10px; }
+        .btn-manual:hover { background-color: #047857; }
+        .btn-limpiar { background-color: #10b981; font-size: 18px; padding: 14px 24px; width: 100%; }
+
+        .resumen-box { background: #eff6ff; border: 1px solid #bfdbfe; border-radius: 12px; padding: 15px; margin-top: 10px; text-align: left; }
+        .monto-total { font-size: 32px; font-weight: bold; color: #1e40af; text-align: center; margin: 5px 0; }
+        
+        table { width: 100%; border-collapse: collapse; margin-top: 12px; font-size: 14px; }
+        th, td { padding: 10px 8px; text-align: left; border-bottom: 1px solid #e5e7eb; }
+        th { background-color: #dbeafe; color: #1e40af; }
+
+        input[type="number"], input[type="text"] { padding: 10px; border: 1px solid #d1d5db; border-radius: 8px; margin: 5px 0; width: 90%; font-size: 15px; }
+        @keyframes pop { 0% { transform: scale(0.95); } 50% { transform: scale(1.03); } 100% { transform: scale(1); } }
     </style>
 </head>
 <body>
 
-    <div class="card">
-        <h2>🍦 Heladería - Panel de Caja</h2>
-        <p>Verificación automática de transferencias en tiempo real</p>
-        
-        <div id="estadoPago" class="status esperando">
-            ⏳ Esperando transferencia...
+    <div class="container">
+        <!-- ESTADO DEL PAGO -->
+        <div class="card">
+            <h2>🍦 Heladería K-Boom</h2>
+            <p style="color: #6b7280; font-size: 14px; margin: 0;">Verificación de Pagos en Tiempo Real</p>
+            
+            <div id="estadoPago" class="status esperando">
+                ⏳ Esperando pago...
+            </div>
+
+            <button id="btnLimpiar" class="btn-limpiar" style="display:none;" onclick="limpiarPantalla()">
+                ✅ Cobro Recibido - Siguiente
+            </button>
         </div>
 
-        <br>
-        <button onclick="reiniciarCaja()">🔄 Reiniciar para Nuevo Cliente</button>
+        <!-- AGREGAR MANUAL -->
+        <div class="card">
+            <h3 style="margin-top: 0;">➕ Registrar Pago Manual</h3>
+            <input type="number" id="montoManual" placeholder="Monto (Ej: 12000)" />
+            <input type="text" id="descManual" placeholder="Descripción (Ej: Efectivo / Nequi)" />
+            <button class="btn-manual" onclick="agregarManual()">💾 Guardar en Caja</button>
+        </div>
+
+        <!-- CONTABILIDAD Y RESUMEN -->
+        <div class="card">
+            <div class="resumen-box">
+                <h3 style="margin: 0; color: #1e40af; text-align: center;">📊 Total Ventas de Hoy</h3>
+                <div class="monto-total" id="txtTotalDia">$0</div>
+                <p style="text-align: center; margin: 0 0 10px 0; color: #4b5563; font-size: 13px;" id="txtCantVentas">0 ventas registradas</p>
+                
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Hora</th>
+                            <th>Tipo</th>
+                            <th>Monto</th>
+                        </tr>
+                    </thead>
+                    <tbody id="cuerpoTabla">
+                        <tr><td colspan="3" style="text-align: center;">Sin ventas registradas hoy.</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
     </div>
 
     <script>
-        async function consultarEstado() {
+        let ultimoAudio = false;
+
+        function reproducirSonido() {
             try {
-                const respuesta = await fetch('/estado-pago');
-                const datos = await respuesta.json();
+                const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+                const osc = audioCtx.createOscillator();
+                const gain = audioCtx.createGain();
+                osc.type = 'sine';
+                osc.frequency.setValueAtTime(587.33, audioCtx.currentTime); // Tono agradable D5
+                gain.gain.setValueAtTime(0.1, audioCtx.currentTime);
+                osc.connect(gain);
+                gain.connect(audioCtx.destination);
+                osc.start();
+                osc.stop(audioCtx.currentTime + 0.3);
+            } catch(e){}
+        }
 
-                const caja = document.getElementById("estadoPago");
+        async function consultarPago() {
+            try {
+                const res = await fetch(`/estado-pago`);
+                const data = await res.json();
 
-                if (datos.estado === 'pagado') {
+                if (data.confirmado) {
+                    const caja = document.getElementById("estadoPago");
                     caja.className = "status pagado";
-                    caja.innerHTML = `✅ ¡PAGO CONFIRMADO!<br>Monto: ${datos.monto}<br><small style="font-size:14px; font-weight:normal;">Hora: ${datos.fecha}</small>`;
-                } else {
-                    caja.className = "status esperando";
-                    caja.innerHTML = "⏳ Esperando transferencia...";
+                    caja.innerHTML = `✅ ¡PAGO RECIBIDO!<br><span style="font-size: 34px;">$${data.monto.toLocaleString('es-CO')}</span><br><small style="font-size: 12px; font-weight: normal;">Hora: ${data.fecha}</small>`;
+                    document.getElementById("btnLimpiar").style.display = "block";
+                    
+                    if (!ultimoAudio) {
+                        reproducirSonido();
+                        ultimoAudio = true;
+                    }
+                    cargarVentasDia();
                 }
-            } catch (error) {
-                console.log("Error al consultar el servidor:", error);
+            } catch (err) {
+                console.log("Error consultando estado:", err);
             }
         }
 
-        async function reiniciarCaja() {
-            await fetch('/reiniciar', { method: 'POST' });
-            consultarEstado();
+        async function limpiarPantalla() {
+            await fetch(`/limpiar-pago`, { method: 'POST' });
+            const caja = document.getElementById("estadoPago");
+            caja.className = "status esperando";
+            caja.innerHTML = "⏳ Esperando pago...";
+            document.getElementById("btnLimpiar").style.display = "none";
+            ultimoAudio = false;
         }
 
-        // Consultar el estado en el servidor cada 3 segundos
-        setInterval(consultarEstado, 3000);
-    </script>
+        async function cargarVentasDia() {
+            try {
+                const res = await fetch(`/ventas-dia`);
+                const data = await res.json();
 
+                document.getElementById("txtTotalDia").innerText = `$${data.total.toLocaleString('es-CO')}`;
+                document.getElementById("txtCantVentas").innerText = `${data.cantidad} venta(s) registrada(s) hoy`;
+
+                const tbody = document.getElementById("cuerpoTabla");
+                tbody.innerHTML = "";
+
+                if (data.ventas.length === 0) {
+                    tbody.innerHTML = `<tr><td colspan="3" style="text-align: center;">Sin ventas registradas hoy.</td></tr>`;
+                    return;
+                }
+
+                data.ventas.slice().reverse().forEach(v => {
+                    const fila = `<tr>
+                        <td>${v.hora}</td>
+                        <td>${v.tipo}</td>
+                        <td><b>$${v.monto.toLocaleString('es-CO')}</b></td>
+                    </tr>`;
+                    tbody.innerHTML += fila;
+                });
+            } catch (err) {
+                console.log("Error cargando reporte:", err);
+            }
+        }
+
+        async function agregarManual() {
+            const monto = document.getElementById("montoManual").value;
+            const descripcion = document.getElementById("descManual").value;
+
+            if (!monto || monto <= 0) {
+                alert("Por favor ingresa un monto válido.");
+                return;
+            }
+
+            await fetch(`/agregar-manual`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ monto: monto, descripcion: descripcion })
+            });
+
+            document.getElementById("montoManual").value = "";
+            document.getElementById("descManual").value = "";
+            cargarVentasDia();
+        }
+
+        setInterval(consultarPago, 2000);
+        cargarVentasDia();
+    </script>
 </body>
 </html>
