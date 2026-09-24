@@ -1,102 +1,97 @@
 const express = require('express');
-const cors = require('cors');
 const path = require('path');
 
 const app = express();
-app.use(cors());
+
+// Permitir que el servidor entienda datos en formato JSON y texto
 app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
 
-const PORT = process.env.PORT || 3000;
+// Servir la página web del cajero (index.html)
+app.use(express.static(path.join(__dirname)));
 
-// Base de datos temporal en memoria
-let pagoActual = { confirmado: false, monto: 0, fecha: null, referencia: '' };
-let registroVentas = []; // Historial diario
+// Variable en memoria para guardar temporalmente el último pago recibido
+let ultimoPagoRegistrado = null;
 
-function getFechaHoy() {
-    const hoy = new Date();
-    return hoy.toISOString().split('T')[0];
-}
+// RUTA WEBHOOK: Recibe los datos enviados desde Make, MacroDroid o pruebas manuales
+// Acepta tanto /webhook como /alerta-bancolombia
+app.post(['/webhook', '/alerta-bancolombia'], (req, res) => {
+    console.log("------------------------------------------------");
+    console.log("🔔 ¡NUEVA NOTIFICACIÓN / BANCO RECIBIDA!");
+    console.log("Datos recibidos:", JSON.stringify(req.body, null, 2));
 
-// Servir la pantalla de la heladería
+    let textoNotificacion = "";
+    let montoDetectado = 0;
+    let bancoDetectado = "Bancolombia";
+
+    // 1. Extraer el texto disponible desde los datos enviados
+    if (req.body) {
+        if (typeof req.body === 'string') {
+            textoNotificacion = req.body;
+        } else {
+            // Revisa si Make o el correo enviaron texto en diferentes campos
+            textoNotificacion = req.body.monto || req.body.texto || req.body.text || req.body.subject || req.body.body || JSON.stringify(req.body);
+        }
+    }
+
+    // 2. Buscar dinámicamente un valor en dinero dentro del texto (Ej: $12.000, 12,000 COP, etc.)
+    let coincidencia = textoNotificacion.match(/\$?\s*([\d\.\,]+)/);
+
+    if (coincidencia && coincidencia[1]) {
+        // Limpiamos los puntos o comas para obtener el número entero
+        let numeroLimpio = coincidencia[1].replace(/\./g, '').replace(',', '');
+        let valorEfectivo = parseInt(numeroLimpio, 10);
+
+        // Validamos que sea un número coherente
+        if (!isNaN(valorEfectivo) && valorEfectivo > 0) {
+            montoDetectado = valorEfectivo;
+        }
+    }
+
+    // Si Make envió directamente un número claro en la variable 'monto'
+    if (typeof req.body.monto === 'number') {
+        montoDetectado = req.body.monto;
+    }
+
+    // Identificar banco si viene en la petición
+    if (req.body.banco) {
+        bancoDetectado = req.body.banco;
+    }
+
+    // Si encontramos un monto válido, guardamos la transferencia
+    if (montoDetectado > 0) {
+        ultimoPagoRegistrado = {
+            monto: montoDetectado,
+            banco: bancoDetectado,
+            fecha: new Date().toLocaleTimeString('es-CO')
+        };
+        console.log(`✅ ¡PAGO EXTRAÍDO CON ÉXITO! Monto: $${montoDetectado} COP`);
+    } else {
+        console.log("⚠️ Se recibió la alerta pero no se pudo extraer un monto numérico válido.");
+    }
+
+    // Responder a Make / Cliente HTTP con respuesta exitosa
+    res.status(200).send('Notificación recibida y procesada correctamente');
+});
+
+// RUTA CONSULTA: La pantalla consulta esta ruta constantemente para actualizarse
+app.get('/consultar-pago', (req, res) => {
+    if (ultimoPagoRegistrado) {
+        let pagoAEnviar = ultimoPagoRegistrado;
+        ultimoPagoRegistrado = null; // Se borra para no repetir la alerta en pantalla
+        res.json({ nuevoPago: true, pago: pagoAEnviar });
+    } else {
+        res.json({ nuevoPago: false });
+    }
+});
+
+// Ruta principal para cargar el archivo HTML
 app.get('/', (req, res) => {
     res.sendFile(path.join(__dirname, 'index.html'));
 });
 
-// 1. RUTA INSTANTÁNEA (Make / Webhook / Nequi / Bancolombia)
-app.post('/alerta-bancolombia', (req, res) => {
-    const { monto, referencia } = req.body;
-    const montoNum = parseFloat(monto) || 0;
-    const horaActual = new Date().toLocaleTimeString('es-CO', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
-
-    if (montoNum > 0) {
-        pagoActual = {
-            confirmado: true,
-            monto: montoNum,
-            fecha: horaActual,
-            referencia: referencia || 'N/A'
-        };
-
-        registroVentas.push({
-            id: Date.now(),
-            monto: montoNum,
-            hora: horaActual,
-            tipo: 'Transferencia (Auto)',
-            referencia: referencia || 'N/A',
-            fechaCompleta: getFechaHoy()
-        });
-
-        console.log(`⚡ Pago automático registrado: $${montoNum} - Ref: ${referencia}`);
-    }
-
-    res.status(200).send('OK');
-});
-
-// 2. Consulta estado de pago en pantalla
-app.get('/estado-pago', (req, res) => {
-    res.json(pagoActual);
-});
-
-// 3. Confirmar y limpiar pantalla para la siguiente venta
-app.post('/limpiar-pago', (req, res) => {
-    pagoActual = { confirmado: false, monto: 0, fecha: null, referencia: '' };
-    res.json({ status: 'ok' });
-});
-
-// 4. Obtener contabilidad y resumen del día
-app.get('/ventas-dia', (req, res) => {
-    const fechaHoy = getFechaHoy();
-    const ventasHoy = registroVentas.filter(v => v.fechaCompleta === fechaHoy);
-    const totalAcumulado = ventasHoy.reduce((acc, curr) => acc + curr.monto, 0);
-
-    res.json({
-        total: totalAcumulado,
-        cantidad: ventasHoy.length,
-        ventas: ventasHoy
-    });
-});
-
-// 5. Agregar registro manual (Efectivo / Transferencia manual)
-app.post('/agregar-manual', (req, res) => {
-    const { monto, descripcion } = req.body;
-    const montoNum = parseFloat(monto);
-
-    if (!montoNum || montoNum <= 0) {
-        return res.status(400).json({ error: 'Monto no válido' });
-    }
-
-    const horaActual = new Date().toLocaleTimeString('es-CO', { hour: '2-digit', minute: '2-digit' });
-    const nuevaVenta = {
-        id: Date.now(),
-        monto: montoNum,
-        hora: horaActual,
-        tipo: descripcion || 'Efectivo / Manual',
-        referencia: 'Manual',
-        fechaCompleta: getFechaHoy()
-    };
-
-    registroVentas.push(nuevaVenta);
-    res.json({ status: 'ok', venta: nuevaVenta });
-});
+// Configuración de puerto para Render o entorno local
+const PORT = process.env.PORT || 3000;
 
 app.listen(PORT, () => {
     console.log(`🚀 Servidor ejecutándose en el puerto ${PORT}`);
