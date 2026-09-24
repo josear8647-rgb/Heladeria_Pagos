@@ -82,8 +82,16 @@ async function revisarCorreos() {
     }
 }
 
-// Revisa cada 20 segundos para ahorrar memoria RAM en Render
-setInterval(revisarCorreos, 5000);
+
+// Ruta instantánea que recibirá el aviso desde Make.com
+app.post('/alerta-bancolombia', (req, res) => {
+    console.log('⚡ ¡Notificación instantánea recibida de Bancolombia!');
+    
+    // Aquí avisamos a la pantalla del cajero inmediatamente
+    // (Si usas WebSockets / Socket.io o actualizas el estado)
+    
+    res.status(200).send('Alerta procesada en tiempo real');
+});
 
 app.get('/', (req, res) => {
     res.sendFile(path.join(__dirname, 'index.html'));
