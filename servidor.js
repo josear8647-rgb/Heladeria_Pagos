@@ -1,40 +1,29 @@
 const express = require('express');
+const path = require('path');
+
 const app = express();
-const PORT = 3000;
 
+// Middleware para entender JSON (necesario para cuando el banco envíe notificaciones)
 app.use(express.json());
-app.use(express.static('./'));
 
-let ultimoPagoRegistrado = null;
-
-// RUTA QUE RECIBIRÁ LAS NOTIFICACIONES REALES O DE PRUEBA DEL BANCO
-app.post('/webhook-banco', (req, res) => {
-    const { monto, banco } = req.body;
-
-    console.log(`\n🔔 ¡TRANSFERENCIA DETECTADA!`);
-    console.log(`💰 Monto: $${monto} COP | Banco: ${banco || 'Bancolombia'}`);
-
-    // Guardamos el pago para que la pantalla del cajero lo lea
-    ultimoPagoRegistrado = {
-        monto: monto || 15000,
-        banco: banco || 'Bancolombia',
-        fecha: new Date()
-    };
-
-    res.status(200).send({ status: "OK", mensaje: "Notificación procesada con éxito" });
+// Servir la pantalla principal (asegúrate de que tu HTML se llame 'index.html' o cambia el nombre abajo)
+app.get('/', (req, res) => {
+    res.sendFile(path.join(__dirname, 'index.html'));
 });
 
-// RUTA QUE LA PÁGINA CONSULTA SEGUNDO A SEGUNDO
-app.get('/ultimo-pago', (res, resOut) => {
-    if (ultimoPagoRegistrado) {
-        let pagoEnviar = ultimoPagoRegistrado;
-        ultimoPagoRegistrado = null; // Limpiar para no repetir la alerta
-        resOut.json({ nuevoPago: true, monto: pagoEnviar.monto, banco: pagoEnviar.banco });
-    } else {
-        resOut.json({ nuevoPago: false });
-    }
+// Ruta Webhook: Aquí recibirá las notificaciones de transferencia de Bancolombia / Wompi
+app.post('/webhook', (req, res) => {
+    const evento = req.body;
+
+    console.log('🔔 Notificación recibida del banco:', evento);
+
+    // Respuesta 200 para confirmarle al banco que recibimos el mensaje
+    res.status(200).send('Webhook recibido con éxito');
 });
+
+// Configuración dinámica del puerto (Paso clave para Render)
+const PORT = process.env.PORT || 3000;
 
 app.listen(PORT, () => {
-    console.log(`🚀 Servidor de la heladería corriendo en http://localhost:${PORT}`);
+    console.log(`🚀 Servidor ejecutándose en el puerto ${PORT}`);
 });
