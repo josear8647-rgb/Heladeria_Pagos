@@ -1,5 +1,6 @@
 const express = require('express');
 const cors = require('cors');
+const path = require('path');
 const Imap = require('node-imap');
 const { simpleParser } = require('mailparser');
 
@@ -9,10 +10,17 @@ app.use(express.json());
 
 const PORT = process.env.PORT || 3000;
 
+// Servir la pantalla HTML directamente cuando abras la URL principal
+app.use(express.static(__dirname));
+
+app.get('/', (req, res) => {
+    res.sendFile(path.join(__dirname, 'pantalla_cajero.html'));
+});
+
 // Configuración de correo Gmail
 const configImap = {
-    user: 'TU_CORREO_GMAIL@gmail.com', // <--- Reemplaza con tu correo
-    password: 'TU_CONTRASEÑA_DE_16_LETRAS', // <--- Reemplaza con tu clave de app
+    user: 'TU_CORREO_GMAIL@gmail.com', // <--- Reemplaza con tu correo de Gmail
+    password: 'TU_CONTRASEÑA_DE_16_LETRAS', // <--- Reemplaza con tu contraseña de aplicación de Gmail
     host: 'imap.gmail.com',
     port: 993,
     tls: true,
@@ -21,15 +29,15 @@ const configImap = {
 
 // Base de datos temporal en memoria
 let pagoActual = { confirmado: false, monto: 0, fecha: null };
-let registroVentas = []; // Historial de transferencias y pagos del día
+let registroVentas = []; // Historial de transferencias del día
 
-// Función para obtener la fecha de hoy en formato YYYY-MM-DD
+// Obtener fecha actual en formato YYYY-MM-DD
 function getFechaHoy() {
     const hoy = new Date();
     return hoy.toISOString().split('T')[0];
 }
 
-// Escuchar correos entrantes de Gmail
+// Lógica para escuchar correos de Bancolombia en tiempo real
 function iniciarEscuchaEmail() {
     const imap = new Imap(configImap);
 
@@ -48,7 +56,7 @@ function iniciarEscuchaEmail() {
                             const texto = parsed.text || '';
                             const asunto = parsed.subject || '';
 
-                            // Filtro de correo de Bancolombia
+                            // Identificar mensajes de Bancolombia
                             if (asunto.includes('transferencia') || texto.includes('recibió') || texto.includes('abono')) {
                                 const coincidenciaMonto = texto.match(/\$\s?([\d.,]+)/);
                                 if (coincidenciaMonto) {
@@ -62,7 +70,7 @@ function iniciarEscuchaEmail() {
                                         fecha: horaActual
                                     };
 
-                                    // Guardar en el historial del día
+                                    // Guardar la transferencia en el día
                                     registroVentas.push({
                                         id: Date.now(),
                                         monto: montoNum,
@@ -90,18 +98,43 @@ iniciarEscuchaEmail();
 
 // RUTAS DE LA API
 
-// 1. Consultar estado del pago actual
+// 1. Consultar si hay pago entrante
 app.get('/estado-pago', (req, res) => {
     res.json(pagoActual);
 });
 
-// 2. Limpiar aviso de pago actual para la siguiente venta
+// 2. Webhook secundario para pruebas manuales desde terminal
+app.post('/webhook-banco', (req, res) => {
+    const { monto, banco } = req.body;
+    const horaActual = new Date().toLocaleTimeString('es-CO', { hour: '2-digit', minute: '2-digit' });
+
+    if (monto) {
+        pagoActual = {
+            confirmado: true,
+            monto: parseFloat(monto),
+            fecha: horaActual
+        };
+
+        registroVentas.push({
+            id: Date.now(),
+            monto: parseFloat(monto),
+            hora: horaActual,
+            tipo: `Prueba (${banco || 'Bancolombia'})`,
+            fechaCompleta: getFechaHoy()
+        });
+
+        return res.json({ status: 'ok', mensaje: 'Pago recibido correctamente' });
+    }
+    res.status(400).json({ error: 'Monto no proporcionado' });
+});
+
+// 3. Limpiar aviso de pantalla tras confirmar pago
 app.post('/limpiar-pago', (req, res) => {
     pagoActual = { confirmado: false, monto: 0, fecha: null };
     res.json({ status: 'ok' });
 });
 
-// 3. Obtener el resumen del día (Total acumulado y lista de transferencias)
+// 4. Obtener contabilidad y resumen de hoy
 app.get('/ventas-dia', (req, res) => {
     const fechaHoy = getFechaHoy();
     const ventasHoy = registroVentas.filter(v => v.fechaCompleta === fechaHoy);
@@ -114,7 +147,7 @@ app.get('/ventas-dia', (req, res) => {
     });
 });
 
-// 4. Agregar una transferencia o pago manualmente
+// 5. Agregar una transferencia manualmente desde el formulario
 app.post('/agregar-manual', (req, res) => {
     const { monto, descripcion } = req.body;
     
@@ -136,5 +169,5 @@ app.post('/agregar-manual', (req, res) => {
 });
 
 app.listen(PORT, () => {
-    console.log(`Servidor ejecutándose en el puerto ${PORT}`);
+    console.log(`Servidor de la heladería iniciado en el puerto ${PORT}`);
 });
