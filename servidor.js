@@ -3,7 +3,11 @@ const cors = require('cors');
 
 const app = express();
 app.use(cors());
+
+// Habilitamos lectura de JSON, URL-Encoded y Texto Plano para soportar cualquier Webhook/MacroDroid
 app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
+app.use(express.text());
 
 const PORT = process.env.PORT || 3000;
 
@@ -17,10 +21,31 @@ function getFechaHoy() {
 
 // RUTA ULTRA RÁPIDA: Recibe el aviso directamente desde el celular o webhook
 app.post('/alerta-bancolombia', (req, res) => {
-    const { monto, referencia } = req.body;
-    
-    let montoNum = parseFloat(monto);
+    let montoNum = 0;
+    let referencia = 'Bancolombia / Nequi';
+
+    // 1. Extraer el texto completo sin importar cómo lo envíe el celular o webhook
+    let textoCompleto = '';
+    if (typeof req.body === 'object' && req.body !== null) {
+        if (req.body.monto) montoNum = parseFloat(req.body.monto);
+        if (req.body.referencia) referencia = req.body.referencia;
+        textoCompleto = JSON.stringify(req.body);
+    } else {
+        textoCompleto = String(req.body || '');
+    }
+
+    // 2. Si no vino el campo directo "monto", buscamos el valor en el texto (ej: $15.000 o 15000)
     if (isNaN(montoNum) || montoNum <= 0) {
+        const coincidencia = textoCompleto.match(/\$?\s*([0-9]{1,3}(?:\.[0-9]{3})+|[0-9]{4,})/);
+        if (coincidencia) {
+            let numeroLimpio = coincidencia[0].replace(/\$/g, '').trim().replace(/\./g, '');
+            montoNum = parseFloat(numeroLimpio);
+        }
+    }
+
+    // 3. Validar si pudimos extraer un monto válido
+    if (isNaN(montoNum) || montoNum <= 0) {
+        console.log('❌ Alerta recibida pero no se detectó un monto válido:', textoCompleto);
         return res.status(400).json({ error: 'Monto no válido' });
     }
 
@@ -36,11 +61,11 @@ app.post('/alerta-bancolombia', (req, res) => {
         id: Date.now(),
         monto: montoNum,
         hora: horaActual,
-        tipo: referencia || 'Bancolombia / Nequi',
+        tipo: referencia,
         fechaCompleta: getFechaHoy()
     });
 
-    console.log(`⚡ ¡Pago al instante recibido!: $${montoNum}`);
+    console.log(`⚡ ¡Pago al instante recibido y validado!: $${montoNum}`);
     res.json({ status: 'ok', mensaje: 'Pago registrado al instante' });
 });
 
