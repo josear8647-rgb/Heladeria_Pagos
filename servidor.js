@@ -4,7 +4,7 @@ const cors = require('cors');
 const app = express();
 app.use(cors());
 
-// Habilitamos lectura de JSON, URL-Encoded y Texto Plano para soportar cualquier Webhook/MacroDroid
+// Lectura de JSON, URL-Encoded y Texto Plano
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 app.use(express.text());
@@ -24,7 +24,7 @@ app.post('/alerta-bancolombia', (req, res) => {
     let montoNum = 0;
     let referencia = 'Bancolombia / Nequi';
 
-    // 1. Extraer el texto completo sin importar cómo lo envíe el celular o webhook
+    // 1. Extraer texto o JSON
     let textoCompleto = '';
     if (typeof req.body === 'object' && req.body !== null) {
         if (req.body.monto) montoNum = parseFloat(req.body.monto);
@@ -34,7 +34,7 @@ app.post('/alerta-bancolombia', (req, res) => {
         textoCompleto = String(req.body || '');
     }
 
-    // 2. Si no vino el campo directo "monto", buscamos el valor en el texto (ej: $15.000 o 15000)
+    // 2. Extraer monto si vino en texto plano
     if (isNaN(montoNum) || montoNum <= 0) {
         const coincidencia = textoCompleto.match(/\$?\s*([0-9]{1,3}(?:\.[0-9]{3})+|[0-9]{4,})/);
         if (coincidencia) {
@@ -43,7 +43,6 @@ app.post('/alerta-bancolombia', (req, res) => {
         }
     }
 
-    // 3. Validar si pudimos extraer un monto válido
     if (isNaN(montoNum) || montoNum <= 0) {
         console.log('❌ Alerta recibida pero no se detectó un monto válido:', textoCompleto);
         return res.status(400).json({ error: 'Monto no válido' });
@@ -51,6 +50,7 @@ app.post('/alerta-bancolombia', (req, res) => {
 
     const horaActual = new Date().toLocaleTimeString('es-CO', { hour: '2-digit', minute: '2-digit' });
 
+    // ⚡ AQUÍ SE REGISTRA Y SE HABILITA LA CONFIRMACIÓN PARA LA PANTALLA
     pagoActual = {
         confirmado: true,
         monto: montoNum,
@@ -106,7 +106,7 @@ app.post('/agregar-manual', (req, res) => {
     res.json({ status: 'ok', venta: nuevaVenta });
 });
 
-// INTERFAZ WEB COMPLETA (/)
+// INTERFAZ WEB COMPLETA
 app.get('/', (req, res) => {
     res.send(`
 <!DOCTYPE html>
@@ -175,7 +175,7 @@ app.get('/', (req, res) => {
             try {
                 const res = await fetch(\`\${URL_SERVIDOR}/estado-pago\`);
                 const data = await res.json();
-                if (data.confirmado) {
+                if (data && data.confirmado) {
                     const caja = document.getElementById("estadoPago");
                     caja.className = "status pagado";
                     caja.innerHTML = \`✅ ¡PAGO CONFIRMADO!<br><br><span style="font-size: 30px;">$\${data.monto.toLocaleString('es-CO')}</span><br><small style="font-size: 13px; font-weight: normal;">Hora: \${data.fecha}</small>\`;
@@ -225,7 +225,6 @@ app.get('/', (req, res) => {
             cargarVentasDia();
         }
 
-        // Revisa cada 1 segundo para respuesta inmediata
         setInterval(consultarPago, 1000);
         cargarVentasDia();
     </script>
