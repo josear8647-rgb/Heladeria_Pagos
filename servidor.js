@@ -19,12 +19,12 @@ function getFechaHoy() {
     return new Date().toISOString().split('T')[0];
 }
 
-// RUTA ULTRA RÁPIDA: Recibe el aviso directamente desde el celular o webhook
+// RUTA MEJORADA Y ULTRA FLEXIBLE
 app.post('/alerta-bancolombia', (req, res) => {
     let montoNum = 0;
     let referencia = 'Bancolombia / Nequi';
 
-    // 1. Extraer texto o JSON
+    // 1. Obtener el contenido bruto sin importar el formato enviado
     let textoCompleto = '';
     if (typeof req.body === 'object' && req.body !== null) {
         if (req.body.monto) montoNum = parseFloat(req.body.monto);
@@ -34,23 +34,24 @@ app.post('/alerta-bancolombia', (req, res) => {
         textoCompleto = String(req.body || '');
     }
 
-    // 2. Extraer monto si vino en texto plano
+    // 2. Extraer monto si no venía explícito en un JSON
     if (isNaN(montoNum) || montoNum <= 0) {
-        const coincidencia = textoCompleto.match(/\$?\s*([0-9]{1,3}(?:\.[0-9]{3})+|[0-9]{4,})/);
+        // Busca cualquier patrón como $340,000, $340.000, $12000 o 12000
+        const coincidencia = textoCompleto.match(/\$?\s*([\d.,]+)/);
         if (coincidencia) {
-            let numeroLimpio = coincidencia[0].replace(/\$/g, '').trim().replace(/\./g, '');
-            montoNum = parseFloat(numeroLimpio);
+            let limpio = coincidencia[1].replace(/[^\d]/g, ''); // Quita puntos, comas y símbolos
+            montoNum = parseFloat(limpio);
         }
     }
 
     if (isNaN(montoNum) || montoNum <= 0) {
-        console.log('❌ Alerta recibida pero no se detectó un monto válido:', textoCompleto);
+        console.log('❌ Alerta recibida sin monto válido. Texto recibido:', textoCompleto);
         return res.status(400).json({ error: 'Monto no válido' });
     }
 
     const horaActual = new Date().toLocaleTimeString('es-CO', { hour: '2-digit', minute: '2-digit' });
 
-    // ⚡ AQUÍ SE REGISTRA Y SE HABILITA LA CONFIRMACIÓN PARA LA PANTALLA
+    // ⚡ REGISTRO Y ACTIVACIÓN
     pagoActual = {
         confirmado: true,
         monto: montoNum,
@@ -65,8 +66,8 @@ app.post('/alerta-bancolombia', (req, res) => {
         fechaCompleta: getFechaHoy()
     });
 
-    console.log(`⚡ ¡Pago al instante recibido y validado!: $${montoNum}`);
-    res.json({ status: 'ok', mensaje: 'Pago registrado al instante' });
+    console.log(`⚡ ¡PAGO VALIDADO!: $${montoNum}`);
+    res.json({ status: 'ok', mensaje: 'Pago confirmado al instante' });
 });
 
 // RUTAS DE LA API PARA LA PANTALLA
