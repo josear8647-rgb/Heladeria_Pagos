@@ -1,135 +1,128 @@
 const express = require('express');
+const cors = require('cors');
 const path = require('path');
 
 const app = express();
-
-// Middlewares
+app.use(cors());
 app.use(express.json());
-app.use(express.static(path.join(__dirname)));
+app.use(express.urlencoded({ extended: true }));
 
-// Bases de datos en memoria para el turno
-let historialPagos = [];
-let ultimoPagoRegistrado = null;
+const PORT = process.env.PORT || 10000;
 
-/**
- * 1. RUTA AUTOMÁTICA (WEBHOOK / MACRODROID / MAKE)
- * Recibe las notificaciones enviadas automáticamente por el celular
- */
-app.post(['/webhook', '/alerta-bancolombia'], (req, res) => {
-    console.log("\n🔔 ¡NOTIFICACIÓN AUTOMÁTICA RECIBIDA!");
-    console.log("Datos recibidos:", req.body);
+// Estado del pago activo para la pantalla
+let pagoActual = { confirmado: false, monto: 0, fecha: null, referencia: '' };
+let registroVentas = []; // Historial diario
 
-    try {
-        const montoRaw = req.body.monto || req.body.valor || req.body.amount;
-        const bancoRaw = req.body.banco || req.body.referencia || req.body.origen || 'Bancolombia';
+function getFechaHoy() {
+    const hoy = new Date();
+    return hoy.toISOString().split('T')[0];
+}
 
-        let montoFinal = 0;
-
-        // Si es prueba manual sin notificación real
-        if (!montoRaw || montoRaw === "" || montoRaw === "[not_text]") {
-            console.log("⚠️ Prueba manual detectada. Asignando monto de prueba.");
-            montoFinal = 10000;
-        } else {
-            // Extraer solo números
-            const soloNumeros = String(montoRaw).replace(/[^0-9]/g, '');
-
-            if (soloNumeros.length > 0) {
-                montoFinal = parseInt(soloNumeros, 10);
-                if (montoFinal > 1000000 && soloNumeros.endsWith("00")) {
-                    montoFinal = montoFinal / 100;
-                }
-            } else {
-                montoFinal = 10000;
-            }
-        }
-
-        const pago = {
-            id: Date.now(),
-            banco: bancoRaw,
-            monto: montoFinal,
-            referencia: 'Automática',
-            hora: new Date().toLocaleTimeString('es-CO', { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
-            tipo: 'Automatico'
-        };
-
-        // Guardar para la alerta emergente y en el historial
-        ultimoPagoRegistrado = pago;
-        historialPagos.push(pago);
-
-        console.log(`✅ Venta automática registrada: $${montoFinal} (${bancoRaw})`);
-
-        return res.status(200).json({
-            exito: true,
-            mensaje: "Notificación procesada con éxito",
-            pago
-        });
-
-    } catch (error) {
-        console.error("❌ Error procesando webhook:", error);
-        return res.status(200).json({ exito: false, mensaje: "Error interno pero recibido" });
-    }
-});
-
-/**
- * 2. RUTA MANUAL (VERIFICACIÓN EN CAJA POR REFERENCIA)
- * Usada cuando el cajero ingresa el monto y los 4 dígitos manualmente
- */
-app.post('/registrar-pago', (req, res) => {
-    const { banco, monto, referencia } = req.body;
-
-    // Control de comprobantes duplicados
-    const repetido = historialPagos.find(p => p.referencia === referencia && p.banco === banco && p.referencia !== 'Automática');
-
-    if (repetido) {
-        return res.status(400).json({
-            exito: false,
-            mensaje: `El comprobante (Ref: ${referencia}) YA FUE USADO anteriormente a las ${repetido.hora}.`
-        });
-    }
-
-    const nuevoPago = {
-        id: Date.now(),
-        banco: banco || 'Bancolombia',
-        monto: Number(monto),
-        referencia: referencia || 'Manual',
-        hora: new Date().toLocaleTimeString('es-CO', { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
-        tipo: 'Manual'
-    };
-
-    historialPagos.push(nuevoPago);
-
-    console.log(`\n💵 Venta manual registrada: $${monto} | Banco: ${banco} | Ref: ${referencia}`);
-
-    res.json({ exito: true, pago: nuevoPago });
-});
-
-/**
- * 3. RUTA CONSULTA EN TIEMPO REAL (PANTALLA CAJERO)
- */
-app.get('/consultar-pago', (req, res) => {
-    if (ultimoPagoRegistrado) {
-        let pagoAEnviar = ultimoPagoRegistrado;
-        ultimoPagoRegistrado = null; // Limpia la alerta para no repetirla
-        res.json({ nuevoPago: true, pago: pagoAEnviar });
-    } else {
-        res.json({ nuevoPago: false });
-    }
-});
-
-/**
- * 4. RUTA HISTORIAL DEL TURNO
- */
-app.get('/historial', (req, res) => {
-    res.json(historialPagos);
-});
-
-// Ruta de inicio
+// Servir la pantalla de la heladería
 app.get('/', (req, res) => {
     res.sendFile(path.join(__dirname, 'index.html'));
 });
 
-// Inicio del servidor
-const PORT = process.env.PORT || 3000;
+// Función para extraer montos numéricos desde texto largo
+function extraerMonto(texto) {
+    if (typeof texto === 'number') return texto;
+    if (!texto) return 0;
+
+    // Busca números precedidos por $ o con formato de miles (ej: $10.000, 10000, 15.500)
+    const str = String(texto);
+    const coincidencia = str.match(/(?:\$\s*)?(\d{1,3}(?:\.\d{3})+|\d+)/);
+    
+    if (coincidencia) {
+        // Elimina puntos de miles
+        const numeroLimpio = coincidencia[1].replace(/\./g, '');
+        return parseFloat(numeroLimpio) || 0;
+    }
+    return 0;
+}
+
+// 1. RUTA RECEPTORA DE NOTIFICACIONES (MacroDroid / Webhooks)
+app.post('/alerta-bancolombia', (req, res) => {
+    console.log("🔔 ¡NOTIFICACIÓN AUTOMÁTICA RECIBIDA!");
+    console.log("Datos recibidos:", req.body);
+
+    const { monto, referencia } = req.body;
+    const montoNum = extraerMonto(monto);
+    const horaActual = new Date().toLocaleTimeString('es-CO', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+
+    if (montoNum > 0) {
+        // ACTIVA LA PANTALLA VERDE EN TIEMPO REAL
+        pagoActual = {
+            confirmado: true,
+            monto: montoNum,
+            fecha: horaActual,
+            referencia: referencia || 'Bancolombia/Nequi'
+        };
+
+        // GUARDA EN EL HISTORIAL DIARIO
+        registroVentas.push({
+            id: Date.now(),
+            monto: montoNum,
+            hora: horaActual,
+            tipo: 'Transferencia (Auto)',
+            referencia: referencia || 'Bancolombia/Nequi',
+            fechaCompleta: getFechaHoy()
+        });
+
+        console.log(`✅ Venta automática registrada: $${montoNum} (${pagoActual.referencia})`);
+    } else {
+        console.log("⚠️ No se pudo extraer un monto válido del mensaje.");
+    }
+
+    res.status(200).send('OK');
+});
+
+// 2. Consulta estado de pago en pantalla (Polling cada 2s)
+app.get('/estado-pago', (req, res) => {
+    res.json(pagoActual);
+});
+
+// 3. Confirmar y limpiar pantalla para la siguiente venta
+app.post('/limpiar-pago', (req, res) => {
+    pagoActual = { confirmado: false, monto: 0, fecha: null, referencia: '' };
+    res.json({ status: 'ok' });
+});
+
+// 4. Obtener contabilidad y resumen del día
+app.get('/ventas-dia', (req, res) => {
+    const fechaHoy = getFechaHoy();
+    const ventasHoy = registroVentas.filter(v => v.fechaCompleta === fechaHoy);
+    const totalAcumulado = ventasHoy.reduce((acc, curr) => acc + curr.monto, 0);
+
+    res.json({
+        total: totalAcumulado,
+        cantidad: ventasHoy.length,
+        ventas: ventasHoy
+    });
+});
+
+// 5. Agregar registro manual (Efectivo / Transferencia manual)
+app.post('/agregar-manual', (req, res) => {
+    const { monto, descripcion } = req.body;
+    const montoNum = parseFloat(monto);
+
+    if (!montoNum || montoNum <= 0) {
+        return res.status(400).json({ error: 'Monto no válido' });
+    }
+
+    const horaActual = new Date().toLocaleTimeString('es-CO', { hour: '2-digit', minute: '2-digit' });
+    const nuevaVenta = {
+        id: Date.now(),
+        monto: montoNum,
+        hora: horaActual,
+        tipo: descripcion || 'Efectivo / Manual',
+        referencia: 'Manual',
+        fechaCompleta: getFechaHoy()
+    };
+
+    registroVentas.push(nuevaVenta);
+    res.json({ status: 'ok', venta: nuevaVenta });
+});
+
 app.listen(PORT, () => {
-    console.log(`🚀 Servidor ejecutándose correctamente en http://localhost:${PORT}`);
+    console.log(`🚀 Servidor ejecutándose correctamente en el puerto ${PORT}`);
 });
