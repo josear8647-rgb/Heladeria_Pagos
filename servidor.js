@@ -1,239 +1,135 @@
 const express = require('express');
-const cors = require('cors');
+const path = require('path');
 
 const app = express();
-app.use(cors());
 
-// Lectura de JSON, URL-Encoded y Texto Plano
+// Middlewares
 app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
-app.use(express.text());
+app.use(express.static(path.join(__dirname)));
 
-const PORT = process.env.PORT || 3000;
+// Bases de datos en memoria para el turno
+let historialPagos = [];
+let ultimoPagoRegistrado = null;
 
-// Base de datos en memoria
-let pagoActual = { confirmado: false, monto: 0, fecha: null };
-let registroVentas = [];
+/**
+ * 1. RUTA AUTOMÁTICA (WEBHOOK / MACRODROID / MAKE)
+ * Recibe las notificaciones enviadas automáticamente por el celular
+ */
+app.post(['/webhook', '/alerta-bancolombia'], (req, res) => {
+    console.log("\n🔔 ¡NOTIFICACIÓN AUTOMÁTICA RECIBIDA!");
+    console.log("Datos recibidos:", req.body);
 
-function getFechaHoy() {
-    return new Date().toISOString().split('T')[0];
-}
+    try {
+        const montoRaw = req.body.monto || req.body.valor || req.body.amount;
+        const bancoRaw = req.body.banco || req.body.referencia || req.body.origen || 'Bancolombia';
 
-// RUTA MEJORADA Y ULTRA FLEXIBLE
-app.post('/alerta-bancolombia', (req, res) => {
-    let montoNum = 0;
-    let referencia = 'Bancolombia / Nequi';
+        let montoFinal = 0;
 
-    // 1. Obtener el contenido bruto sin importar el formato enviado
-    let textoCompleto = '';
-    if (typeof req.body === 'object' && req.body !== null) {
-        if (req.body.monto) montoNum = parseFloat(req.body.monto);
-        if (req.body.referencia) referencia = req.body.referencia;
-        textoCompleto = JSON.stringify(req.body);
+        // Si es prueba manual sin notificación real
+        if (!montoRaw || montoRaw === "" || montoRaw === "[not_text]") {
+            console.log("⚠️ Prueba manual detectada. Asignando monto de prueba.");
+            montoFinal = 10000;
+        } else {
+            // Extraer solo números
+            const soloNumeros = String(montoRaw).replace(/[^0-9]/g, '');
+
+            if (soloNumeros.length > 0) {
+                montoFinal = parseInt(soloNumeros, 10);
+                if (montoFinal > 1000000 && soloNumeros.endsWith("00")) {
+                    montoFinal = montoFinal / 100;
+                }
+            } else {
+                montoFinal = 10000;
+            }
+        }
+
+        const pago = {
+            id: Date.now(),
+            banco: bancoRaw,
+            monto: montoFinal,
+            referencia: 'Automática',
+            hora: new Date().toLocaleTimeString('es-CO', { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
+            tipo: 'Automatico'
+        };
+
+        // Guardar para la alerta emergente y en el historial
+        ultimoPagoRegistrado = pago;
+        historialPagos.push(pago);
+
+        console.log(`✅ Venta automática registrada: $${montoFinal} (${bancoRaw})`);
+
+        return res.status(200).json({
+            exito: true,
+            mensaje: "Notificación procesada con éxito",
+            pago
+        });
+
+    } catch (error) {
+        console.error("❌ Error procesando webhook:", error);
+        return res.status(200).json({ exito: false, mensaje: "Error interno pero recibido" });
+    }
+});
+
+/**
+ * 2. RUTA MANUAL (VERIFICACIÓN EN CAJA POR REFERENCIA)
+ * Usada cuando el cajero ingresa el monto y los 4 dígitos manualmente
+ */
+app.post('/registrar-pago', (req, res) => {
+    const { banco, monto, referencia } = req.body;
+
+    // Control de comprobantes duplicados
+    const repetido = historialPagos.find(p => p.referencia === referencia && p.banco === banco && p.referencia !== 'Automática');
+
+    if (repetido) {
+        return res.status(400).json({
+            exito: false,
+            mensaje: `El comprobante (Ref: ${referencia}) YA FUE USADO anteriormente a las ${repetido.hora}.`
+        });
+    }
+
+    const nuevoPago = {
+        id: Date.now(),
+        banco: banco || 'Bancolombia',
+        monto: Number(monto),
+        referencia: referencia || 'Manual',
+        hora: new Date().toLocaleTimeString('es-CO', { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
+        tipo: 'Manual'
+    };
+
+    historialPagos.push(nuevoPago);
+
+    console.log(`\n💵 Venta manual registrada: $${monto} | Banco: ${banco} | Ref: ${referencia}`);
+
+    res.json({ exito: true, pago: nuevoPago });
+});
+
+/**
+ * 3. RUTA CONSULTA EN TIEMPO REAL (PANTALLA CAJERO)
+ */
+app.get('/consultar-pago', (req, res) => {
+    if (ultimoPagoRegistrado) {
+        let pagoAEnviar = ultimoPagoRegistrado;
+        ultimoPagoRegistrado = null; // Limpia la alerta para no repetirla
+        res.json({ nuevoPago: true, pago: pagoAEnviar });
     } else {
-        textoCompleto = String(req.body || '');
+        res.json({ nuevoPago: false });
     }
-
-    // 2. Extraer monto si no venía explícito en un JSON
-    if (isNaN(montoNum) || montoNum <= 0) {
-        // Busca cualquier patrón como $340,000, $340.000, $12000 o 12000
-        const coincidencia = textoCompleto.match(/\$?\s*([\d.,]+)/);
-        if (coincidencia) {
-            let limpio = coincidencia[1].replace(/[^\d]/g, ''); // Quita puntos, comas y símbolos
-            montoNum = parseFloat(limpio);
-        }
-    }
-
-    if (isNaN(montoNum) || montoNum <= 0) {
-        console.log('❌ Alerta recibida sin monto válido. Texto recibido:', textoCompleto);
-        return res.status(400).json({ error: 'Monto no válido' });
-    }
-
-    const horaActual = new Date().toLocaleTimeString('es-CO', { hour: '2-digit', minute: '2-digit' });
-
-    // ⚡ REGISTRO Y ACTIVACIÓN
-    pagoActual = {
-        confirmado: true,
-        monto: montoNum,
-        fecha: horaActual
-    };
-
-    registroVentas.push({
-        id: Date.now(),
-        monto: montoNum,
-        hora: horaActual,
-        tipo: referencia,
-        fechaCompleta: getFechaHoy()
-    });
-
-    console.log(`⚡ ¡PAGO VALIDADO!: $${montoNum}`);
-    res.json({ status: 'ok', mensaje: 'Pago confirmado al instante' });
 });
 
-// RUTAS DE LA API PARA LA PANTALLA
-app.get('/estado-pago', (req, res) => res.json(pagoActual));
-
-app.post('/limpiar-pago', (req, res) => {
-    pagoActual = { confirmado: false, monto: 0, fecha: null };
-    res.json({ status: 'ok' });
+/**
+ * 4. RUTA HISTORIAL DEL TURNO
+ */
+app.get('/historial', (req, res) => {
+    res.json(historialPagos);
 });
 
-app.get('/ventas-dia', (req, res) => {
-    const fechaHoy = getFechaHoy();
-    const ventasHoy = registroVentas.filter(v => v.fechaCompleta === fechaHoy);
-    const totalAcumulado = ventasHoy.reduce((acc, curr) => acc + curr.monto, 0);
-
-    res.json({
-        total: totalAcumulado,
-        cantidad: ventasHoy.length,
-        ventas: ventasHoy
-    });
-});
-
-app.post('/agregar-manual', (req, res) => {
-    const { monto, descripcion } = req.body;
-    if (!monto || isNaN(monto) || monto <= 0) return res.status(400).json({ error: 'Monto inválido' });
-
-    const horaActual = new Date().toLocaleTimeString('es-CO', { hour: '2-digit', minute: '2-digit' });
-    const nuevaVenta = {
-        id: Date.now(),
-        monto: parseFloat(monto),
-        hora: horaActual,
-        tipo: descripcion || 'Manual / Efectivo',
-        fechaCompleta: getFechaHoy()
-    };
-
-    registroVentas.push(nuevaVenta);
-    res.json({ status: 'ok', venta: nuevaVenta });
-});
-
-// INTERFAZ WEB COMPLETA
+// Ruta de inicio
 app.get('/', (req, res) => {
-    res.send(`
-<!DOCTYPE html>
-<html lang="es">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Caja Heladería - Control de Pagos</title>
-    <style>
-        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: #eef2f5; text-align: center; padding: 20px; }
-        .card { background: white; max-width: 500px; margin: 0 auto 20px auto; padding: 25px; border-radius: 16px; box-shadow: 0 10px 25px rgba(0,0,0,0.08); }
-        h2 { color: #333; margin-bottom: 5px; }
-        .status { padding: 20px; font-size: 20px; font-weight: bold; border-radius: 12px; margin: 20px 0; transition: all 0.3s ease; }
-        .esperando { background-color: #fff8e1; color: #b78103; border: 2px solid #ffe082; }
-        .pagado { background-color: #d4edda; color: #155724; border: 2px solid #c3e6cb; animation: pulse 1s infinite alternate; }
-        button { background-color: #0d6efd; color: white; border: none; padding: 10px 18px; font-size: 15px; border-radius: 8px; cursor: pointer; font-weight: bold; margin: 5px; }
-        button:hover { background-color: #0b5ed7; }
-        .btn-manual { background-color: #198754; }
-        .btn-manual:hover { background-color: #157347; }
-        .resumen-box { background: #e7f1ff; border: 1px solid #b6d4fe; border-radius: 12px; padding: 15px; margin-top: 15px; text-align: left; }
-        .resumen-box h3 { margin: 0 0 10px 0; color: #084298; text-align: center; font-size: 18px; }
-        .monto-total { font-size: 28px; font-weight: bold; color: #0a58ca; text-align: center; margin-bottom: 10px; }
-        table { width: 100%; border-collapse: collapse; margin-top: 10px; font-size: 14px; }
-        th, td { padding: 8px; text-align: left; border-bottom: 1px solid #dee2e6; }
-        th { background-color: #cfe2ff; color: #084298; }
-        input[type="number"], input[type="text"] { padding: 8px; border: 1px solid #ccc; border-radius: 6px; margin: 4px 0; width: 90%; font-size: 14px; }
-        @keyframes pulse { from { transform: scale(1); } to { transform: scale(1.02); } }
-    </style>
-</head>
-<body>
-    <div class="card">
-        <h2>🍦 Heladería - Control de Caja</h2>
-        <p style="color: #666; margin-top: 0;">Verificación Instantánea de Transferencias</p>
-        <div id="estadoPago" class="status esperando">⏳ Esperando transferencia...</div>
-        <button id="btnLimpiar" style="display:none;" onclick="limpiarPantalla()">🔄 Confirmar y Siguiente Pago</button>
-    </div>
-
-    <div class="card">
-        <h3>➕ Registrar Pago Manual</h3>
-        <input type="number" id="montoManual" placeholder="Monto (Ej: 12000)" />
-        <input type="text" id="descManual" placeholder="Descripción (Ej: Nequi / Efectivo)" />
-        <br>
-        <button class="btn-manual" onclick="agregarManual()">💾 Guardar Pago</button>
-    </div>
-
-    <div class="card">
-        <div class="resumen-box">
-            <h3>📊 Resumen de Ventas de Hoy</h3>
-            <div class="monto-total" id="txtTotalDia">$0</div>
-            <p style="text-align: center; margin: 0; color: #555; font-size: 13px;" id="txtCantVentas">0 pagos registrados</p>
-            <table>
-                <thead>
-                    <tr><th>Hora</th><th>Tipo</th><th>Monto</th></tr>
-                </thead>
-                <tbody id="cuerpoTabla">
-                    <tr><td colspan="3" style="text-align: center;">No hay registros hoy.</td></tr>
-                </tbody>
-            </table>
-        </div>
-    </div>
-
-    <script>
-        const URL_SERVIDOR = window.location.origin;
-
-        async function consultarPago() {
-            try {
-                const res = await fetch(\`\${URL_SERVIDOR}/estado-pago\`);
-                const data = await res.json();
-                if (data && data.confirmado) {
-                    const caja = document.getElementById("estadoPago");
-                    caja.className = "status pagado";
-                    caja.innerHTML = \`✅ ¡PAGO CONFIRMADO!<br><br><span style="font-size: 30px;">$\${data.monto.toLocaleString('es-CO')}</span><br><small style="font-size: 13px; font-weight: normal;">Hora: \${data.fecha}</small>\`;
-                    document.getElementById("btnLimpiar").style.display = "inline-block";
-                    cargarVentasDia();
-                }
-            } catch (err) {}
-        }
-
-        async function limpiarPantalla() {
-            await fetch(\`\${URL_SERVIDOR}/limpiar-pago\`, { method: 'POST' });
-            const caja = document.getElementById("estadoPago");
-            caja.className = "status esperando";
-            caja.innerHTML = "⏳ Esperando transferencia...";
-            document.getElementById("btnLimpiar").style.display = "none";
-        }
-
-        async function cargarVentasDia() {
-            try {
-                const res = await fetch(\`\${URL_SERVIDOR}/ventas-dia\`);
-                const data = await res.json();
-                document.getElementById("txtTotalDia").innerText = \`$\${data.total.toLocaleString('es-CO')}\`;
-                document.getElementById("txtCantVentas").innerText = \`\${data.cantidad} pago(s) registrado(s) hoy\`;
-                const tbody = document.getElementById("cuerpoTabla");
-                tbody.innerHTML = "";
-                if (data.ventas.length === 0) {
-                    tbody.innerHTML = \`<tr><td colspan="3" style="text-align: center;">No hay registros hoy.</td></tr>\`;
-                    return;
-                }
-                data.ventas.slice().reverse().forEach(v => {
-                    tbody.innerHTML += \`<tr><td>\${v.hora}</td><td>\${v.tipo}</td><td><b>$\${v.monto.toLocaleString('es-CO')}</b></td></tr>\`;
-                });
-            } catch (err) {}
-        }
-
-        async function agregarManual() {
-            const monto = document.getElementById("montoManual").value;
-            const descripcion = document.getElementById("descManual").value;
-            if (!monto || monto <= 0) return alert("Ingresa un monto válido.");
-            await fetch(\`\${URL_SERVIDOR}/agregar-manual\`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ monto, descripcion })
-            });
-            document.getElementById("montoManual").value = "";
-            document.getElementById("descManual").value = "";
-            cargarVentasDia();
-        }
-
-        setInterval(consultarPago, 1000);
-        cargarVentasDia();
-    </script>
-</body>
-</html>
-    `);
+    res.sendFile(path.join(__dirname, 'index.html'));
 });
 
+// Inicio del servidor
+const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
-    console.log(`Servidor ultra rápido corriendo en puerto ${PORT}`);
+    console.log(`🚀 Servidor ejecutándose correctamente en http://localhost:${PORT}`);
 });
