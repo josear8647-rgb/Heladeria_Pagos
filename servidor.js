@@ -39,7 +39,21 @@ function extraerMonto(texto) {
     }
     return 0;
 }
-
+// Función para extraer el número exacto del texto de la notificación
+function extraerMonto(texto) {
+    if (typeof texto === 'number') return texto;
+    if (!texto) return 0;
+    
+    // Busca números precedidos por $ o con puntos/comas (Ej: $15.000 o 15,000.00)
+    const limpio = String(texto).replace(/,/g, '');
+    const coincidencia = limpio.match(/\$?\s*([0-9]{1,3}(?:\.[0-9]{3})+|[0-9]{4,})/);
+    
+    if (coincidencia) {
+        let numeroSinPuntos = coincidencia[0].replace(/\$/g, '').trim().replace(/\./g, '');
+        return parseFloat(numeroSinPuntos);
+    }
+    return 0;
+}
 // 1. RUTA RECEPTORA DE NOTIFICACIONES (MacroDroid / Webhooks)
 app.post('/alerta-bancolombia', (req, res) => {
     console.log("🔔 ¡NOTIFICACIÓN AUTOMÁTICA RECIBIDA!");
