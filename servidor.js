@@ -23,25 +23,35 @@ app.get('/', (req, res) => {
     res.sendFile(path.join(__dirname, 'index.html'));
 });
 // Función para extraer montos numéricos desde texto largo
+// Función para extraer montos numéricos desde texto largo
 function extraerMonto(texto) {
     if (typeof texto === 'number') return texto;
     if (!texto) return 0;
 
-    // Convertir a minúsculas para verificar palabras clave
+    // Convertir a texto y minúsculas
     const textoMinusculas = String(texto).toLowerCase();
 
-    // FILTRO DE SALIENTES: Si el mensaje contiene palabras de salidas/compras, retorna 0
+    // Ver en la consola qué texto está llegando exactamente
+    console.log("📩 Texto recibido en servidor:", textoMinusculas);
+
+    // FILTRO DE TRANSACCIONES SALIENTES (PAGOS/ENVIOS TUYOS)
     if (textoMinusculas.includes("transferiste") || 
         textoMinusculas.includes("enviaste") || 
         textoMinusculas.includes("compra") || 
         textoMinusculas.includes("pago realizado") ||
-        textoMinusculas.includes("pagaste")) {
+        textoMinusculas.includes("pagaste") ||
+        textoMinusculas.includes("envio exitoso") ||
+        textoMinusculas.includes("envío exitoso") ||
+        textoMinusculas.includes("transferencia a") ||
+        textoMinusculas.includes("debito") ||
+        textoMinusculas.includes("débito") ||
+        textoMinusculas.includes("salida")) {
         
         console.log("⚠️ Notificación ignorada: Es una transferencia saliente o pago tuyo.");
-        return 0; // Devuelve 0 para que no registre el pago
+        return 0; // Devuelve 0 para no registrar nada
     }
 
-    // Código habitual para buscar el dinero en el texto...
+    // Extraer el valor del dinero
     let coincidencia = textoMinusculas.match(/\$?\s*([\d\.\,]+)/);
     if (coincidencia && coincidencia[1]) {
         let numeroLimpio = coincidencia[1].replace(/\./g, '').replace(',', '');
