@@ -22,7 +22,35 @@ function getFechaHoy() {
 app.get('/', (req, res) => {
     res.sendFile(path.join(__dirname, 'index.html'));
 });
+// Función para extraer montos numéricos desde texto largo
+function extraerMonto(texto) {
+    if (typeof texto === 'number') return texto;
+    if (!texto) return 0;
 
+    // Convertir a minúsculas para verificar palabras clave
+    const textoMinusculas = String(texto).toLowerCase();
+
+    // FILTRO DE SALIENTES: Si el mensaje contiene palabras de salidas/compras, retorna 0
+    if (textoMinusculas.includes("transferiste") || 
+        textoMinusculas.includes("enviaste") || 
+        textoMinusculas.includes("compra") || 
+        textoMinusculas.includes("pago realizado") ||
+        textoMinusculas.includes("pagaste")) {
+        
+        console.log("⚠️ Notificación ignorada: Es una transferencia saliente o pago tuyo.");
+        return 0; // Devuelve 0 para que no registre el pago
+    }
+
+    // Código habitual para buscar el dinero en el texto...
+    let coincidencia = textoMinusculas.match(/\$?\s*([\d\.\,]+)/);
+    if (coincidencia && coincidencia[1]) {
+        let numeroLimpio = coincidencia[1].replace(/\./g, '').replace(',', '');
+        let valorNumerico = parseInt(numeroLimpio, 10);
+        if (!isNaN(valorNumerico)) return valorNumerico;
+    }
+
+    return 0;
+}
 // Función para extraer montos numéricos desde texto largo
 function extraerMonto(texto) {
     if (typeof texto === 'number') return texto;
